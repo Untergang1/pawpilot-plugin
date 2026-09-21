@@ -1,0 +1,88 @@
+# pawpilot-plugin 的唯一配置文件；插件会在每次收到候选消息时重新读取本文件。
+# 除特别说明外，数值项必须是大于 0 的整数，否则代码会使用自身的内置默认值。
+# 布尔开关仅在值为 false 时关闭对应功能，建议始终使用 YAML 布尔值 true/false。
+
+# 是否接管符合条件的自然语言消息。
+# 作用范围：私聊消息，以及群聊中明确 @Bot 的消息；以 # 开头的原有命令不由此入口处理。
+enabled: true
+
+# OpenAI 兼容接口的根地址。插件会向“此地址/chat/completions”发送请求；末尾的 / 会自动移除。
+# 作用范围：pawpilot-plugin 发起的所有模型请求。更换服务商或自建网关时需同时确认 model 与鉴权方式兼容。
+baseURL: "https://ws-rxj9yc5zhdjmi5qy.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+
+# 每次请求发送给兼容接口的模型 ID；模型需要支持 OpenAI 风格的工具调用（Function Calling）。
+# 作用范围：普通聊天、群聊和能力模块调用前后的全部模型推理。
+model: "deepseek-v4-flash-0731"
+
+# API Key 优先从进程环境变量 DASHSCOPE_API_KEY 读取；未设置环境变量时才读取下方可选项。
+# 为避免密钥随配置文件泄露，建议保持注释状态并使用环境变量。
+# apiKey: ""
+
+# 启用的能力模块 ID 白名单。模块向模型提供工具及专属说明；列表为空时仍可进行普通聊天。
+# 当前内置 ID：phi、glory-of-kings。未知 ID 会导致能力加载失败。
+# 作用范围：所有用户均可见普通能力；标记为 ownerOnly 的能力仍只对 Yunzai 主人展示和执行。
+capabilityModules:
+  - phi
+  - glory-of-kings
+
+# 单条用户输入的字符上限（JavaScript 字符串长度）。超限消息会在调用模型前直接拒绝。
+# 私聊中，引用内容与当前消息组合后的模型输入也受此预算约束；群聊当前事件会按此值裁剪。
+maxInputChars: 3000
+
+# 单次对话请求最多执行多少轮工具调用；一轮中可以包含多个工具调用。
+# 达到上限后不再执行模型继续提出的工具。该值不是 HTTP 请求次数，也不限制目标插件自身流程。
+maxToolRounds: 4
+
+# 单次模型 HTTP 请求的超时时间，单位毫秒。
+# 作用范围：每一轮模型请求；不包含排队时间，也不限制能力工具/目标插件的执行时间。
+requestTimeoutMs: 30000
+
+# 滑动限流窗口长度，单位毫秒。
+# 私聊按“机器人 + 用户”计数；群聊按“机器人 + 群 + 发起用户”计数。
+rateLimitWindowMs: 60000
+
+# 每个上述限流键在一个滑动窗口内允许开始的最大请求数；私聊和群聊均适用。
+rateLimitMaxRequests: 8
+
+# 同一私聊限流键允许同时处理的最大请求数，通常设为 1 以避免同一用户上下文乱序。
+# 仅作用于私聊；群聊并发由下方“每群 FIFO 队列”控制，不同群之间仍可并行。
+rateLimitMaxConcurrent: 1
+
+# 同一“机器人 + 群”的 FIFO 队列最多容纳的未完成请求数，包含正在执行的 1 条和等待项。
+# 同群请求严格串行；达到上限的新请求会立即提示繁忙。不同机器人或不同群使用独立队列。
+groupRequestQueueMaxOutstanding: 8
+
+# 是否给群聊模型消息附加 OpenAI 协议的 name 字段，用稳定的匿名成员标识区分参与者。
+# 仅作用于群聊上下文；关闭后仍保留消息正文中的发送者名称/ID 文本标签。
+groupParticipantNameEnabled: true
+
+# 每个会话在进程内最多保留的已完成对话轮数；一轮等于一条用户消息和一条助手回复。
+# 私聊按“机器人 + 用户”隔离，群聊按“机器人 + 群”共享；重启进程后内存记录会清空。
+conversationHistoryTurns: 24
+
+# 内存会话的有效期，单位分钟，从最近一次写入已完成对话/恢复历史时计算。
+# 到期后该会话会被丢弃；后续请求可按下方开关尝试从适配器恢复历史。
+conversationTtlMinutes: 45
+
+# 单个内存会话历史的总字符预算，同时也是组装群聊历史上下文时的字符上限。
+# 超限时优先丢弃较旧内容，必要时裁剪最后一轮；不包含系统提示词和当前用户消息。
+conversationMaxChars: 12000
+
+# 私聊内存上下文为空时，是否尝试通过兼容的 OneBot 适配器恢复最近聊天记录。
+# 仅作用于私聊且只在无缓存时触发；适配器不支持或读取失败时会静默退化为空历史。
+conversationHistoryRecoveryEnabled: true
+
+# 单次私聊历史恢复最多采用的消息条数（用户与机器人消息合计）。
+# 恢复结果还会受到 conversationMaxChars 的内存预算裁剪。
+conversationHistoryRecoveryMaxMessages: 32
+
+# 群聊中有人 @Bot 时，是否从兼容的 OneBot 适配器读取当前消息之前的群历史。
+# 每次群请求都会尝试读取，并与 TTL 内的已完成 AI 对话按消息 ID 去重合并；失败时仅用内存历史。
+groupHistoryRecoveryEnabled: true
+
+# 单次从适配器读取并采用的群历史消息条数上限，不包含当前触发消息。
+groupHistoryRecoveryMaxMessages: 64
+
+# 单次适配器群历史快照的字符预算；优先保留较新的消息，单位为字符。
+# 快照与内存历史合并后，最终历史上下文还会统一受 conversationMaxChars 限制。
+groupHistoryRecoveryMaxChars: 8000
