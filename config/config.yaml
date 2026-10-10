@@ -6,6 +6,24 @@
 # 作用范围：私聊消息，以及群聊中明确 @Bot 的消息；以 # 开头的原有命令不由此入口处理。
 enabled: true
 
+# 模型后端：dashscope 或 codex。省略时为 dashscope；其他值会使请求失败。
+# dashscope：使用下方 baseURL、model 与 API Key 调用 OpenAI 兼容接口。
+# codex：通过 Codex SDK 使用 ChatGPT 订阅额度，读取下方 codex 小节，忽略 baseURL、model、apiKey 与 requestTimeoutMs。
+provider: dashscope
+
+# provider 为 codex 时的设置。
+codex:
+  # bot 专用的 CODEX_HOME，仅存放登录态与 Codex 会话记录；不要指向个人的 ~/.codex，
+  # 否则个人配置中的插件、MCP server 与 AGENTS.md 会被加载进 bot 请求。支持 ~ 开头。
+  # 首次使用前登录一次：CODEX_HOME=~/.codex-pawpilot codex login --device-auth
+  home: "~/.codex-pawpilot"
+  # 模型 ID；留空时使用 Codex 默认模型。
+  model: ""
+  # 推理强度，例如 minimal、low、medium、high；聊天场景建议 low。
+  reasoningEffort: low
+  # 单轮 Codex 调用超时，单位毫秒；每轮会启动一次 Codex CLI，耗时明显高于 HTTP 接口。
+  requestTimeoutMs: 120000
+
 # OpenAI 兼容接口的根地址。插件会向“此地址/chat/completions”发送请求；末尾的 / 会自动移除。
 # 作用范围：pawpilot-plugin 发起的所有模型请求。更换服务商或自建网关时需同时确认 model 与鉴权方式兼容。
 baseURL: "https://ws-rxj9yc5zhdjmi5qy.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
@@ -33,7 +51,7 @@ maxInputChars: 3000
 # 达到上限后不再执行模型继续提出的工具。该值不是 HTTP 请求次数，也不限制目标插件自身流程。
 maxToolRounds: 4
 
-# 单次模型 HTTP 请求的超时时间，单位毫秒。
+# 单次模型 HTTP 请求的超时时间，单位毫秒；仅 provider 为 dashscope 时使用。
 # 作用范围：每一轮模型请求；不包含排队时间，也不限制能力工具/目标插件的执行时间。
 requestTimeoutMs: 30000
 

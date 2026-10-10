@@ -6,7 +6,8 @@ Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力
 
 ## 配置
 
-推荐在 Bot 进程环境中设置 `DASHSCOPE_API_KEY`；全部其他配置均直接写入
+默认使用 DashScope（`provider: dashscope`），也可改用 Codex 订阅额度，见下文。使用 DashScope 时推荐在 Bot
+进程环境中设置 `DASHSCOPE_API_KEY`；全部其他配置均直接写入
 [`config/config.yaml`](config/config.yaml)。这是 pawpilot-plugin 唯一读取的配置文件，默认模型为
 `qwen-plus`，接口为百炼 OpenAI 兼容地址。
 
@@ -21,6 +22,31 @@ Phi 或王者荣耀意图时会调用对应工具，再交给目标插件的原�
 集成提示词修改后，由主人发送 `#ai reload`。公共提示词及 `prompts/PRIVATE_SYSTEM_PROMPT.md`、
 `prompts/GROUP_SYSTEM_PROMPT.md` 场景提示词会在每次 AI 请求时按需读取，修改后无需执行此命令。普通用户只看到
 普通能力，`ownerOnly` 能力会在展示和调用两处拦截。
+
+### 使用 Codex 订阅额度
+
+将 `provider` 设为 `codex` 后，pawpilot-plugin 通过 [`@openai/codex-sdk`](https://www.npmjs.com/package/@openai/codex-sdk)
+调用 Codex，消耗 ChatGPT 订阅额度而非 API 计费，且与同一账号的其他 Codex 使用共享额度和速率限制。先在 Yunzai
+根目录执行 `pnpm install` 安装插件依赖，再为 bot 准备专用的 `CODEX_HOME` 并登录一次：
+
+```bash
+mkdir -p ~/.codex-pawpilot
+CODEX_HOME=~/.codex-pawpilot codex login --device-auth
+```
+
+`codex.home` 必须是 bot 专用目录：个人 `~/.codex` 中的插件、MCP server 和 `AGENTS.md` 会被 Codex 加载，
+其中 MCP 与插件在沙箱外运行。Codex 子进程不会继承 `OPENAI_API_KEY` 和 `CODEX_API_KEY`，以确保使用订阅登录。
+
+Codex 是 agent 而非 chat-completions 接口，插件按以下方式把它当作纯推理后端：
+
+- 每轮工具调用对应一次无状态的 Codex turn。系统提示词、可用函数清单与输出协议写入临时的
+  `model_instructions_file`，替换 Codex 默认的编程 agent 指令；对话与函数结果序列化为 transcript 作为输入。
+- 输出由 JSON Schema 约束为 `{ reply, tool_calls }`，再转换为 OpenAI 风格的 assistant 消息，
+  因此工具循环、权限检查与审计仍由 `runFunctionCalling` 负责。输出无法解析时本次请求失败。
+- 权限配置拒绝全部文件系统访问并限制网络，Codex 自带的 shell 和改文件工具无法执行；web search 关闭。
+  Codex 仍会注入其内置的 skills 与多智能体说明，子智能体继承同一权限配置。
+- 每轮都会启动一次 Codex CLI，单轮通常需要数秒到十余秒，超时由 `codex.requestTimeoutMs` 控制。Codex
+  会在 `codex.home` 下保存每轮的会话记录，可按需清理。
 
 ## 聊天人格与短期上下文
 

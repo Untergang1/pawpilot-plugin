@@ -3,6 +3,7 @@ import cfg from '../../lib/config/config.js'
 import { CapabilityModuleLoader } from './lib/capability-loader.js'
 import { getAgentConfig } from './lib/config.js'
 import { QwenClient, QwenClientError } from './lib/qwen-client.js'
+import { CodexClient, CodexClientError } from './lib/codex-client.js'
 import { RequestLimiter } from './lib/rate-limit.js'
 import { GroupRequestQueue } from './lib/group-request-queue.js'
 import { runFunctionCalling } from './lib/agent-runner.js'
@@ -38,6 +39,39 @@ function getConfig () {
 function positiveInteger (value, fallback) {
   const number = Number(value)
   return Number.isInteger(number) && number > 0 ? number : fallback
+}
+
+function createModelClient (config) {
+  if (config.provider === 'codex') {
+    const codex = config.codex ?? {}
+    return new CodexClient({
+      codexHome: typeof codex.home === 'string' && codex.home ? codex.home : undefined,
+      model: typeof codex.model === 'string' ? codex.model : undefined,
+      reasoningEffort: typeof codex.reasoningEffort === 'string' ? codex.reasoningEffort : undefined,
+      timeoutMs: positiveInteger(codex.requestTimeoutMs, 120_000)
+    })
+  }
+  if (config.provider !== undefined && config.provider !== 'dashscope') {
+    throw new QwenClientError('Unknown model provider', 'INVALID_PROVIDER')
+  }
+  const apiKey = process.env.DASHSCOPE_API_KEY || config.apiKey
+  if (!apiKey) throw new QwenClientError('DashScope API key is not configured', 'API_KEY_MISSING')
+  return new QwenClient({
+    apiKey,
+    baseURL: config.baseURL,
+    model: config.model,
+    timeoutMs: positiveInteger(config.requestTimeoutMs, 30_000)
+  })
+}
+
+function publicErrorMessage (error) {
+  if (error instanceof QwenClientError && error.code === 'API_KEY_MISSING') {
+    return 'AI 服务尚未配置 API Key。请设置 DASHSCOPE_API_KEY 或 pawpilot-plugin/config/config.yaml 中的 apiKey。'
+  }
+  if (error instanceof CodexClientError && error.code === 'CODEX_NOT_LOGGED_IN') {
+    return 'AI 服务的 Codex 尚未登录，请主人按 pawpilot-plugin 文档完成 codex login。'
+  }
+  return 'AI 服务暂时不可用，请稍后重试。'
 }
 
 function sessionScope (event, userId, groupId) {
@@ -80,7 +114,7 @@ export class pawPilot extends plugin {
   constructor () {
     super({
       name: 'PawPilot',
-      dsc: 'DashScope Qwen function-calling assistant',
+      dsc: 'LLM function-calling assistant (DashScope or Codex)',
       event: 'message',
       priority: 900,
       rule: [{ reg: '^#ai\\s*reload$', fnc: 'reloadCapabilities', permission: 'master' }]
@@ -179,14 +213,7 @@ export class pawPilot extends plugin {
     maxInputChars
   }) {
     try {
-      const apiKey = process.env.DASHSCOPE_API_KEY || config.apiKey
-      const client = new QwenClient({
-        apiKey,
-        baseURL: config.baseURL,
-        model: config.model,
-        timeoutMs: positiveInteger(config.requestTimeoutMs, 30_000)
-      })
-      if (!apiKey) throw new QwenClientError('DashScope API key is not configured', 'API_KEY_MISSING')
+      const client = createModelClient(config)
       await ensureCapabilities(moduleIds, moduleKey)
 
       if (event.isGroup && groupId) {
@@ -261,9 +288,7 @@ export class pawPilot extends plugin {
       conversations.appendExchange(scope, message, text)
       return this.reply(text, true)
     } catch (error) {
-      const publicMessage = error instanceof QwenClientError && error.code === 'API_KEY_MISSING'
-        ? 'AI 服务尚未配置 API Key。请设置 DASHSCOPE_API_KEY 或 pawpilot-plugin/config/config.yaml 中的 apiKey。'
-        : 'AI 服务暂时不可用，请稍后重试。'
+      const publicMessage = publicErrorMessage(error)
       global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} failed code=${error?.code ?? 'UNKNOWN'}`)
       return this.reply(publicMessage, true)
     }
