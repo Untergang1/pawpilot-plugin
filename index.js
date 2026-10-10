@@ -57,7 +57,14 @@ function isOwner (event) {
   return owners.includes(String(event.user_id))
 }
 
+function isSelfMessage (event) {
+  return event?.self_id != null && event?.user_id != null &&
+    String(event.user_id) === String(event.self_id)
+}
+
 function isAgentMessage (event) {
+  // Ignore the bot's own messages (e.g. echoed sends) to avoid reply loops.
+  if (isSelfMessage(event)) return false
   const message = typeof event?.msg === 'string' ? event.msg.trim() : ''
   if (!message && event?.reply_id == null) return false
   if (message.startsWith('#')) return false
