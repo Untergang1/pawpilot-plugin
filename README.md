@@ -6,10 +6,15 @@ Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力
 
 ## 配置
 
-默认使用 DashScope（`provider: dashscope`），也可改用 Codex 订阅额度，见下文。使用 DashScope 时推荐在 Bot
-进程环境中设置 `DASHSCOPE_API_KEY`；全部其他配置均直接写入
-[`config/config.yaml`](config/config.yaml)。这是 pawpilot-plugin 唯一读取的配置文件，默认模型为
-`qwen-plus`，接口为百炼 OpenAI 兼容地址。
+全部配置均写入 [`config/config.yaml`](config/config.yaml)，这是 pawpilot-plugin 唯一读取的配置文件。
+`provider` 选择模型后端，插件只读取与之同名的小节：
+
+- `dashscope`（默认）：`dashscope.baseURL`、`dashscope.model`、`dashscope.apiKey`、`dashscope.requestTimeoutMs`，
+  调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程环境中设置 `DASHSCOPE_API_KEY`，它优先于
+  `dashscope.apiKey`。
+- `codex`：`codex.home`、`codex.model`、`codex.reasoningEffort`、`codex.requestTimeoutMs`，见下文。
+
+其余顶层字段（能力模块、输入上限、工具轮数、限流、会话与历史恢复等）对两种后端都生效。
 
 ```powershell
 $env:DASHSCOPE_API_KEY = 'sk-...'

@@ -54,19 +54,20 @@ function createModelClient (config) {
   if (config.provider !== undefined && config.provider !== 'dashscope') {
     throw new QwenClientError('Unknown model provider', 'INVALID_PROVIDER')
   }
-  const apiKey = process.env.DASHSCOPE_API_KEY || config.apiKey
+  const dashscope = config.dashscope ?? {}
+  const apiKey = process.env.DASHSCOPE_API_KEY || dashscope.apiKey
   if (!apiKey) throw new QwenClientError('DashScope API key is not configured', 'API_KEY_MISSING')
   return new QwenClient({
     apiKey,
-    baseURL: config.baseURL,
-    model: config.model,
-    timeoutMs: positiveInteger(config.requestTimeoutMs, 30_000)
+    baseURL: dashscope.baseURL,
+    model: dashscope.model,
+    timeoutMs: positiveInteger(dashscope.requestTimeoutMs, 30_000)
   })
 }
 
 function publicErrorMessage (error) {
   if (error instanceof QwenClientError && error.code === 'API_KEY_MISSING') {
-    return 'AI 服务尚未配置 API Key。请设置 DASHSCOPE_API_KEY 或 pawpilot-plugin/config/config.yaml 中的 apiKey。'
+    return 'AI 服务尚未配置 API Key。请设置 DASHSCOPE_API_KEY 或 pawpilot-plugin/config/config.yaml 中的 dashscope.apiKey。'
   }
   if (error instanceof CodexClientError && error.code === 'CODEX_NOT_LOGGED_IN') {
     return 'AI 服务的 Codex 尚未登录，请主人按 pawpilot-plugin 文档完成 codex login。'

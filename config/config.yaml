@@ -6,12 +6,26 @@
 # 作用范围：私聊消息，以及群聊中明确 @Bot 的消息；以 # 开头的原有命令不由此入口处理。
 enabled: true
 
-# 模型后端：dashscope 或 codex。省略时为 dashscope；其他值会使请求失败。
-# dashscope：使用下方 baseURL、model 与 API Key 调用 OpenAI 兼容接口。
-# codex：通过 Codex SDK 使用 ChatGPT 订阅额度，读取下方 codex 小节，忽略 baseURL、model、apiKey 与 requestTimeoutMs。
+# ───────────── 模型后端 ─────────────
+# provider 选择后端：dashscope 或 codex。省略时为 dashscope；其他值会使请求失败。
+# 只读取与 provider 同名的小节，另一个小节被忽略。
 provider: dashscope
 
-# provider 为 codex 时的设置。
+# provider 为 dashscope 时的设置：调用 OpenAI 兼容的 chat/completions 接口。
+dashscope:
+  # 接口根地址。插件会向“此地址/chat/completions”发送请求；末尾的 / 会自动移除。
+  # 更换服务商或自建网关时需同时确认 model 与鉴权方式兼容。
+  baseURL: "https://ws-rxj9yc5zhdjmi5qy.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+  # 模型 ID；模型需要支持 OpenAI 风格的工具调用（Function Calling）。
+  model: "deepseek-v4-flash-0731"
+  # API Key 优先从进程环境变量 DASHSCOPE_API_KEY 读取；未设置环境变量时才读取此项。
+  # 为避免密钥随配置文件泄露，建议保持注释状态并使用环境变量。
+  # apiKey: ""
+  # 单次模型 HTTP 请求的超时时间，单位毫秒；作用于每一轮模型请求，
+  # 不包含排队时间，也不限制能力工具/目标插件的执行时间。
+  requestTimeoutMs: 30000
+
+# provider 为 codex 时的设置：通过 Codex SDK 使用 ChatGPT 订阅额度。
 codex:
   # bot 专用的 CODEX_HOME，仅存放登录态与 Codex 会话记录；不要指向个人的 ~/.codex，
   # 否则个人配置中的插件、MCP server 与 AGENTS.md 会被加载进 bot 请求。支持 ~ 开头。
@@ -24,17 +38,7 @@ codex:
   # 单轮 Codex 调用超时，单位毫秒；每轮会启动一次 Codex CLI，耗时明显高于 HTTP 接口。
   requestTimeoutMs: 120000
 
-# OpenAI 兼容接口的根地址。插件会向“此地址/chat/completions”发送请求；末尾的 / 会自动移除。
-# 作用范围：pawpilot-plugin 发起的所有模型请求。更换服务商或自建网关时需同时确认 model 与鉴权方式兼容。
-baseURL: "https://ws-rxj9yc5zhdjmi5qy.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-
-# 每次请求发送给兼容接口的模型 ID；模型需要支持 OpenAI 风格的工具调用（Function Calling）。
-# 作用范围：普通聊天、群聊和能力模块调用前后的全部模型推理。
-model: "deepseek-v4-flash-0731"
-
-# API Key 优先从进程环境变量 DASHSCOPE_API_KEY 读取；未设置环境变量时才读取下方可选项。
-# 为避免密钥随配置文件泄露，建议保持注释状态并使用环境变量。
-# apiKey: ""
+# ───────────── 以下为两种后端共用的设置 ─────────────
 
 # 启用的能力模块 ID 白名单。模块向模型提供工具及专属说明；列表为空时仍可进行普通聊天。
 # 当前内置 ID：phi、glory-of-kings。未知 ID 会导致能力加载失败。
@@ -47,13 +51,9 @@ capabilityModules:
 # 私聊中，引用内容与当前消息组合后的模型输入也受此预算约束；群聊当前事件会按此值裁剪。
 maxInputChars: 3000
 
-# 单次对话请求最多执行多少轮工具调用；一轮中可以包含多个工具调用。
+# 单次对话请求最多执行多少轮工具调用；一轮中可以包含多个工具调用。dashscope 与 codex 均受此限制。
 # 达到上限后不再执行模型继续提出的工具。该值不是 HTTP 请求次数，也不限制目标插件自身流程。
 maxToolRounds: 4
-
-# 单次模型 HTTP 请求的超时时间，单位毫秒；仅 provider 为 dashscope 时使用。
-# 作用范围：每一轮模型请求；不包含排队时间，也不限制能力工具/目标插件的执行时间。
-requestTimeoutMs: 30000
 
 # 滑动限流窗口长度，单位毫秒。
 # 私聊按“机器人 + 用户”计数；群聊按“机器人 + 群 + 发起用户”计数。
