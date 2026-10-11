@@ -30,6 +30,11 @@ function audit (record) {
   global.logger?.[method]?.(text)
 }
 
+function logUsage (requestId, provider, conversationType, usage) {
+  if (!usage) return
+  global.logger?.mark?.(`[pawpilot-plugin] request=${requestId} usage provider=${provider} type=${conversationType} calls=${usage.modelCalls} input=${usage.inputTokens} cached=${usage.cachedTokens} output=${usage.outputTokens} reasoning=${usage.reasoningTokens}`)
+}
+
 function getConfig () {
   const config = getAgentConfig()
   const moduleIds = config.capabilityModules
@@ -251,6 +256,7 @@ export class pawPilot extends plugin {
           maxToolRounds: config.maxToolRounds,
           audit
         })
+        logUsage(requestId, config.provider, 'group', result.usage)
         if (result.handled) return true
         const text = result.text || '我没有生成可发送的回复，请换一种问法。'
         const sendResult = await this.reply(text, true)
@@ -285,6 +291,7 @@ export class pawPilot extends plugin {
         maxToolRounds: config.maxToolRounds,
         audit
       })
+      logUsage(requestId, config.provider, 'private', result.usage)
       if (result.handled) return true
       const text = result.text || '我没有生成可发送的回复，请换一种问法。'
       const sendResult = await this.reply(text, true)

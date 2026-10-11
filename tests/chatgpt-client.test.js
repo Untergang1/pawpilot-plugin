@@ -104,6 +104,14 @@ test('client returns text replies and rejects incomplete streams', async () => {
   assert.deepEqual(await client.complete({ messages: [{ role: 'user', content: 'hi' }] }), { content: '你好' })
 
   const truncated = sse([{ type: 'response.created', response: {} }])
+  const withUsage = sse([
+    { type: 'response.output_item.done', item: { type: 'message', content: [{ type: 'output_text', text: 'ok' }] } },
+    { type: 'response.completed', response: { usage: { input_tokens: 50, input_tokens_details: { cached_tokens: 32 }, output_tokens: 7, output_tokens_details: { reasoning_tokens: 3 } } } }
+  ])
+  client = new ChatGPTClient({ credentialsFile: credentialsFile(), model: 'm', fetchImpl: async () => new Response(withUsage) })
+  assert.deepEqual((await client.complete({ messages: [] })).usage,
+    { inputTokens: 50, cachedTokens: 32, outputTokens: 7, reasoningTokens: 3 })
+
   client = new ChatGPTClient({ credentialsFile: credentialsFile(), model: 'm', fetchImpl: async () => new Response(truncated) })
   await assert.rejects(client.complete({ messages: [] }), error => error.code === 'STREAM_INTERRUPTED')
 })

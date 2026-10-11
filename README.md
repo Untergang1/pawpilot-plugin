@@ -119,6 +119,11 @@ AI 不读取或保存 Phi 存档、王者营地数据或登录态。
 安全日志仅记录请求 ID、用户 ID、工具名、结果码和耗时，绝不记录工具参数、工具结果、API Key 或 token。
 涉及隐私的工具结果只用于当前事件回复。
 
+每个成功完成的请求另记一行用量日志：`request=<id> usage provider=<后端> type=<private|group> calls=<模型调用次数>
+input=<输入 token> cached=<命中缓存的输入 token> output=<输出 token> reasoning=<推理 token>`，为本次请求所有工具轮的合计。
+两种客户端都把各自的 `usage` 字段转换为统一的 `{ inputTokens, cachedTokens, outputTokens, reasoningTokens }`，
+后端未返回某项时记为 0。
+
 ## 开发
 
 能力协议见 [AI_CAPABILITIES.md](AI_CAPABILITIES.md)。测试无需真实 API：

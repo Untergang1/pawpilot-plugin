@@ -250,7 +250,38 @@ test('function calling leaves tool timeout handling to the capability integratio
     toolTimeoutMs: 1
   })
 
-  assert.deepEqual(result, { text: '', handled: true })
+  assert.equal(result.handled, true)
+  assert.equal(result.text, '')
+  assert.equal(result.usage.modelCalls, 1)
+})
+
+test('runner accumulates provider-neutral token usage across model calls', async () => {
+  const registry = new CapabilityRegistry()
+  registry.register(defineCapabilityModule({
+    id: 'demo',
+    capabilities: [{
+      name: 'demo_read',
+      description: 'Reads demo status.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: () => ({ ok: true })
+    }]
+  }))
+  const replies = [
+    { content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'demo_read', arguments: '{}' } }], usage: { inputTokens: 100, cachedTokens: 80, outputTokens: 10, reasoningTokens: 4 } },
+    { content: 'done', usage: { inputTokens: 120, cachedTokens: 100, outputTokens: 5, reasoningTokens: 0 } }
+  ]
+  const result = await runFunctionCalling({
+    client: { complete: async () => replies.shift() },
+    registry,
+    conversationType: 'private',
+    event: {},
+    userId: '1',
+    isOwner: false,
+    userMessage: 'status',
+    requestId: 'usage'
+  })
+  assert.equal(result.text, 'done')
+  assert.deepEqual(result.usage, { modelCalls: 2, inputTokens: 220, cachedTokens: 180, outputTokens: 15, reasoningTokens: 4 })
 })
 
 test('Qwen client sends the OpenAI-compatible request and surfaces HTTP errors safely', async () => {
