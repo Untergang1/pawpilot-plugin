@@ -9,10 +9,16 @@ Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力
 全部配置均写入 [`config/config.yaml`](config/config.yaml)，这是 pawpilot-plugin 唯一读取的配置文件。
 `provider` 选择模型后端，插件只读取与之同名的小节：
 
-- `dashscope`（默认）：`dashscope.baseURL`、`dashscope.model`、`dashscope.apiKey`、`dashscope.requestTimeoutMs`，
-  调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程环境中设置 `DASHSCOPE_API_KEY`，它优先于
-  `dashscope.apiKey`。
+- `dashscope`（默认）：`dashscope.baseURL`、`dashscope.model`、`dashscope.apiKey`、`dashscope.temperature`
+  （0–2，默认 0.7）、`dashscope.requestTimeoutMs`，调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程
+  环境中设置 `DASHSCOPE_API_KEY`，它优先于 `dashscope.apiKey`。
 - `chatgpt`：`chatgpt.credentialsFile`、`chatgpt.model`、`chatgpt.reasoningEffort`、`chatgpt.requestTimeoutMs`，见下文。
+
+两种后端由 `lib/providers.js` 的注册表按 `provider` 创建，并遵守 `lib/model-client.js` 的统一约定：接收
+chat-completions 风格的消息，返回 OpenAI 风格的 assistant 消息及统一 `usage`；单次请求共用一个超时，HTTP 5xx
+重试一次；失败时抛出 `ModelClientError`，`code` 为统一错误码（如 `AUTH_FAILED`、`RATE_LIMITED`、`USAGE_LIMIT`、
+`REQUEST_TIMEOUT`、`SERVER_ERROR`），服务商原始错误码保存在 `providerCode` 并写入失败日志。新增后端只需实现该
+约定并在注册表中登记。
 
 其余顶层字段（能力模块、输入上限、工具轮数、限流、会话与历史恢复等）对两种后端都生效。缺失或非法的数值项
 统一回退到 `lib/config.js` 中 `DEFAULTS` 的内置默认值；配置文件仅在修改时间变化时重新解析。
@@ -60,8 +66,7 @@ node plugins/pawpilot-plugin/scripts/chatgpt-login.js
 - 每个请求带 `prompt_cache_key`，取值为“机器人 + 群”或“机器人 + 私聊用户”的 SHA-256 摘要，使同一会话的请求
   落到同一前缀缓存，且不向服务商发送原始 QQ/微信号。
 - 访问令牌有效期约 1 小时，距过期 5 分钟内自动刷新；refresh token 每次刷新都会轮换，进程内串行刷新并原子写回
-  凭据文件。请求返回 401 时强制刷新并重试一次；刷新被拒时需重新运行登录脚本。返回 5xx 时视为临时故障再重试一次，
-  两次请求共用同一超时。
+  凭据文件。请求返回 401 时强制刷新并重试一次；刷新被拒时需重新运行登录脚本。5xx 按统一约定重试一次。
 - 套餐额度用尽（`subscription_sharing_usage_limit_exceeded` / `subscription_sharing_usage_unavailable`）时向用户
   提示稍后再试。
 

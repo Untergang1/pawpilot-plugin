@@ -2,9 +2,8 @@ import crypto from 'node:crypto'
 import cfg from '../../lib/config/config.js'
 import { CapabilityModuleLoader } from './lib/capability-loader.js'
 import { getAgentConfig } from './lib/config.js'
-import { QwenClient, QwenClientError } from './lib/qwen-client.js'
-import { ChatGPTClient, ChatGPTClientError } from './lib/chatgpt-client.js'
-import { ChatGPTAuthError } from './lib/chatgpt-auth.js'
+import { ModelClientError } from './lib/model-client.js'
+import { createModelClient } from './lib/providers.js'
 import { RequestLimiter } from './lib/rate-limit.js'
 import { GroupRequestQueue } from './lib/group-request-queue.js'
 import { runFunctionCalling } from './lib/agent-runner.js'
@@ -42,43 +41,18 @@ function getConfig () {
   return { config, moduleIds, moduleKey }
 }
 
-function createModelClient (config) {
-  if (config.provider === 'chatgpt') {
-    const { chatgpt } = config
-    return new ChatGPTClient({
-      credentialsFile: typeof chatgpt.credentialsFile === 'string' && chatgpt.credentialsFile
-        ? chatgpt.credentialsFile
-        : undefined,
-      model: typeof chatgpt.model === 'string' ? chatgpt.model : undefined,
-      reasoningEffort: typeof chatgpt.reasoningEffort === 'string' ? chatgpt.reasoningEffort : undefined,
-      timeoutMs: chatgpt.requestTimeoutMs
-    })
-  }
-  if (config.provider !== 'dashscope') {
-    throw new QwenClientError('Unknown model provider', 'INVALID_PROVIDER')
-  }
-  const { dashscope } = config
-  const apiKey = process.env.DASHSCOPE_API_KEY || dashscope.apiKey
-  if (!apiKey) throw new QwenClientError('DashScope API key is not configured', 'API_KEY_MISSING')
-  return new QwenClient({
-    apiKey,
-    baseURL: dashscope.baseURL,
-    model: dashscope.model,
-    timeoutMs: dashscope.requestTimeoutMs
-  })
-}
+const CHATGPT_REAUTH_CODES = new Set(['NOT_LOGGED_IN', 'REAUTH_REQUIRED', 'CREDENTIALS_INVALID'])
 
 function publicErrorMessage (error) {
-  if (error instanceof QwenClientError && error.code === 'API_KEY_MISSING') {
+  if (!(error instanceof ModelClientError)) return 'AI 服务暂时不可用，请稍后重试。'
+  if (error.code === 'API_KEY_MISSING') {
     return 'AI 服务尚未配置 API Key。请设置 DASHSCOPE_API_KEY 或 pawpilot-plugin/config/config.yaml 中的 dashscope.apiKey。'
   }
-  if (error instanceof ChatGPTAuthError &&
-      ['NOT_LOGGED_IN', 'REAUTH_REQUIRED', 'CREDENTIALS_INVALID'].includes(error.code)) {
+  if (error.provider === 'chatgpt' && CHATGPT_REAUTH_CODES.has(error.code)) {
     return 'AI 服务的 ChatGPT 登录已失效，请主人按 pawpilot-plugin 文档重新运行登录脚本。'
   }
-  if (error instanceof ChatGPTClientError && error.code === 'USAGE_LIMIT') {
-    return 'AI 服务的 ChatGPT 套餐额度暂时用尽，请稍后再试。'
-  }
+  if (error.code === 'USAGE_LIMIT') return 'AI 服务的套餐额度暂时用尽，请稍后再试。'
+  if (error.code === 'RATE_LIMITED') return 'AI 服务当前请求过多，请稍后再试。'
   return 'AI 服务暂时不可用，请稍后重试。'
 }
 
@@ -311,7 +285,7 @@ export class pawPilot extends plugin {
       return sendResult
     } catch (error) {
       const publicMessage = publicErrorMessage(error)
-      global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} failed code=${error?.code ?? 'UNKNOWN'} message=${error?.message ?? ''}`)
+      global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} failed code=${error?.code ?? 'UNKNOWN'}${error?.providerCode ? ` providerCode=${error.providerCode}` : ''} message=${error?.message ?? ''}`)
       return this.reply(publicMessage, true)
     }
   }

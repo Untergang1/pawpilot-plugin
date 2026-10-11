@@ -9,7 +9,8 @@ import {
   completeAuthorization,
   createAuthorization
 } from '../lib/chatgpt-auth.js'
-import { ChatGPTClient, ChatGPTClientError, buildResponsesRequest, toAssistantMessage } from '../lib/chatgpt-client.js'
+import { ChatGPTClient, buildResponsesRequest, toAssistantMessage } from '../lib/chatgpt-client.js'
+import { ModelClientError } from '../lib/model-client.js'
 
 function jwt (payload) {
   const part = value => Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -155,7 +156,7 @@ test('usage-limit failures map to USAGE_LIMIT', async () => {
   const failed = sse([{ type: 'response.failed', response: { error: { code: 'subscription_sharing_usage_limit_exceeded' } } }])
   let client = new ChatGPTClient({ credentialsFile: credentialsFile(), model: 'm', fetchImpl: async () => new Response(failed) })
   await assert.rejects(client.complete({ messages: [] }), error =>
-    error instanceof ChatGPTClientError && error.code === 'USAGE_LIMIT')
+    error instanceof ModelClientError && error.code === 'USAGE_LIMIT')
 
   const httpError = JSON.stringify({ error: { code: 'subscription_sharing_usage_unavailable' } })
   client = new ChatGPTClient({ credentialsFile: credentialsFile(), model: 'm', fetchImpl: async () => new Response(httpError, { status: 429 }) })
@@ -199,7 +200,7 @@ test('client retries once after HTTP 5xx', async () => {
     fetchImpl: async () => { calls += 1; return new Response('{}', { status: 503 }) }
   })
   await assert.rejects(client.complete({ messages: [] }), error =>
-    error.code === 'HTTP_ERROR' && error.message.includes('HTTP 503'))
+    error.code === 'SERVER_ERROR' && error.message.includes('HTTP 503'))
   assert.equal(calls, 2)
 })
 

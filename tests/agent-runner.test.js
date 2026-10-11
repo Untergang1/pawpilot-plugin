@@ -7,7 +7,9 @@ import {
   MAX_TOTAL_SYSTEM_PROMPT_CHARS
 } from '../lib/ai-capabilities.js'
 import { buildSystemPrompt, parseToolArguments, runFunctionCalling } from '../lib/agent-runner.js'
-import { QwenClient, QwenClientError } from '../lib/qwen-client.js'
+import { QwenClient } from '../lib/qwen-client.js'
+import { ModelClientError } from '../lib/model-client.js'
+import { createModelClient } from '../lib/providers.js'
 
 test('function calling invokes only a registered, validated function', async () => {
   const registry = new CapabilityRegistry()
@@ -304,6 +306,31 @@ test('Qwen client sends the OpenAI-compatible request and surfaces HTTP errors s
     fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ error: { code: 'InvalidApiKey' } }) })
   })
   await assert.rejects(failed.complete({ messages: [], tools: [] }), error => {
-    return error instanceof QwenClientError && error.code === 'InvalidApiKey' && !error.message.includes('test-key')
+    return error instanceof ModelClientError && error.code === 'AUTH_FAILED' &&
+      error.providerCode === 'InvalidApiKey' && !error.message.includes('test-key')
   })
+})
+
+test('Qwen client retries once on HTTP 5xx and sends the configured temperature', async () => {
+  const bodies = []
+  const client = new QwenClient({
+    apiKey: 'k',
+    model: 'm',
+    temperature: 0.9,
+    fetchImpl: async (_url, options) => {
+      bodies.push(JSON.parse(options.body))
+      return bodies.length === 1
+        ? { ok: false, status: 503, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) }
+    }
+  })
+  assert.equal((await client.complete({ messages: [], tools: [] })).content, 'ok')
+  assert.equal(bodies.length, 2)
+  assert.equal(bodies[0].temperature, 0.9)
+})
+
+test('provider registry builds the configured client and rejects unknown providers', () => {
+  assert.ok(createModelClient({ provider: 'dashscope', dashscope: { apiKey: 'k', model: 'm', requestTimeoutMs: 1000 } }) instanceof QwenClient)
+  assert.throws(() => createModelClient({ provider: 'nope' }), error => error.code === 'INVALID_PROVIDER')
+  assert.throws(() => createModelClient({ provider: 'toString' }), error => error.code === 'INVALID_PROVIDER')
 })
