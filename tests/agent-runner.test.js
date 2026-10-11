@@ -107,12 +107,12 @@ test('system prompt loads only the rules for the selected conversation type', ()
     assert.match(prompt, /never mention plugins, external capabilities, handoffs, dispatching, tools,/)
     assert.match(prompt, /provide its required\n`preface` argument/)
   }
-  assert.match(privatePrompt, /In private conversations/)
-  assert.doesNotMatch(privatePrompt, /messages may come from multiple participants/)
+  assert.match(privatePrompt, /User's message:/)
+  assert.doesNotMatch(privatePrompt, /multiple participants/)
   assert.doesNotMatch(privatePrompt, /Current direct request/)
-  assert.match(groupPrompt, /Only the final message labelled "Current direct request"/)
-  assert.match(groupPrompt, /messages may come from multiple participants/)
-  assert.doesNotMatch(groupPrompt, /In private conversations/)
+  assert.match(groupPrompt, /Current direct request/)
+  assert.match(groupPrompt, /multiple participants/)
+  assert.doesNotMatch(groupPrompt, /User's message:/)
 })
 
 test('function calling includes only valid short-term conversation messages before the new request', async () => {

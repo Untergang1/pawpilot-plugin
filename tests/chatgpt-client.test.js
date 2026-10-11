@@ -63,7 +63,7 @@ test('request conversion maps chat messages to Responses input items', () => {
     type: 'function', name: 'read_status', description: 'Reads a status.', parameters: { type: 'object', properties: {} }, strict: false
   })
   assert.deepEqual(body.input, [
-    { role: 'user', content: '[participant u1]\n查状态' },
+    { role: 'user', content: '查状态' },
     { type: 'function_call', call_id: 'call_a', name: 'read_status', arguments: '{}' },
     { type: 'function_call_output', call_id: 'call_a', output: '{"ok":true}' },
     { role: 'assistant', content: '好了' }

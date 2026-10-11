@@ -5,6 +5,7 @@ import {
   createCurrentGroupEvent,
   formatGroupEvent,
   mergeGroupEvents,
+  messageRef,
   normalizeGroupHistoryMessage
 } from '../lib/group-context.js'
 
@@ -29,8 +30,9 @@ test('current group message keeps an explicit quote inside the same named model 
   const formatted = formatGroupEvent(current)
   assert.equal(formatted.role, 'user')
   assert.equal(formatted.name, 'member_200')
-  assert.match(formatted.content, /Current direct request/)
-  assert.match(formatted.content, /Explicit reply to message old from Alice \(100\)/)
+  assert.match(formatted.content, new RegExp(`^\\[Current direct request #${messageRef('current')} from Bob \\[spoof\\] \\(200\\)\\]`))
+  assert.ok(formatted.content.includes(`[Explicit reply to #${messageRef('old')} from Alice (100)]`))
+  assert.doesNotMatch(formatted.content, /message_seq|"current"/)
   assert.match(formatted.content, /--- quoted content ---/)
   assert.match(formatted.content, /原来的说法/)
   assert.match(formatted.content, /我不同意/)
@@ -79,13 +81,13 @@ test('same text with different ids is retained and history budgets keep the newe
   const result = buildGroupModelMessages({
     historyEvents: [first, second],
     currentEvent: current,
-    maxHistoryChars: 170,
+    maxHistoryChars: 100,
     maxInputChars: 180
   })
   assert.equal(mergeGroupEvents([], [first, second]).length, 2)
   assert.equal(result.contextMessages.length, 1)
-  assert.match(result.contextMessages[0].content, /"two"/)
-  assert.ok(result.contextMessages[0].content.length <= 170)
+  assert.ok(result.contextMessages[0].content.includes(`#${messageRef('two')}`))
+  assert.ok(result.contextMessages[0].content.length <= 100)
   assert.ok(result.currentMessage.content.length <= 180)
 })
 

@@ -51,7 +51,7 @@ node plugins/pawpilot-plugin/scripts/chatgpt-login.js
 
 - system 消息合并为 `instructions`；assistant 的 `tool_calls` 与 tool 消息分别转为 `function_call` 和
   `function_call_output` 输入项；工具定义转为 Responses 的 function 工具。群聊消息的 `name` 字段没有对应项，
-  以 `[participant <name>]` 前缀写入消息正文。
+  直接丢弃，发送者身份由正文中的群聊标签提供。
 - 预览接口要求 `store: false` 与 `stream: true`，且拒绝 `temperature`、`max_output_tokens` 等采样字段；插件读取
   SSE 流，从 `response.output_item.done` 收集输出，只有收到 `response.completed` 才视为成功。
 - 设置了 `reasoningEffort` 时请求附带 `include: ["reasoning.encrypted_content"]`。模型在发起工具调用的那一轮产生的
@@ -97,7 +97,9 @@ history retrieval.
 
 群内有人提及机器人时，pawpilot-plugin 会读取该消息之前最多 64 条、合计不超过 6,000 字符的群历史。适配器历史与
 TTL 内已完成的 AI 对话会按消息 ID 去重、合并为一条带发送者身份的事件流，再由 12,000 字符的会话预算统一
-裁剪。每个参与者同时使用协议 `name` 和文本身份标签；关闭 `groupParticipantNameEnabled` 时仍保留文本标签。
+裁剪。每条消息以 `[<来源> #<引用号> from <昵称> (<用户 ID>)]` 开头，引用号是消息 ID 的 6 位 SHA-256 摘要，
+跨请求保持不变，显式引用写作 `[Explicit reply to #<引用号> ...]`；标签中不含原始消息 ID 和 `message_seq`。
+每个参与者同时使用协议 `name` 和文本身份标签；关闭 `groupParticipantNameEnabled` 时仍保留文本标签。
 当前消息和普通历史中的适配器显式引用都属于各自消息本身，不会被构造成独立发言；历史引用只解析已有消息或
 适配器预览，不逐条额外查询。适配器不支持群历史时会安全退化为仅使用内存中的已完成 AI 对话。
 `rateLimitMaxConcurrent` 仅限制私聊；群聊并发由上述群级 FIFO 管理。
