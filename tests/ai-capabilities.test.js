@@ -134,7 +134,9 @@ test('module system prompts are validated and exposed separately from tools', ()
 test('combined plugin guides use the separate second-level prompt budget', () => {
   const registry = new CapabilityRegistry()
   const guide = 'x'.repeat(MAX_MODULE_SYSTEM_PROMPT_CHARS)
-  for (const id of ['first', 'second', 'third']) {
+  const fullGuides = MAX_TOTAL_MODULE_SYSTEM_PROMPT_CHARS / MAX_MODULE_SYSTEM_PROMPT_CHARS
+  assert.ok(Number.isInteger(fullGuides), 'the total budget holds a whole number of full guides')
+  for (const id of Array.from({ length: fullGuides }, (_, index) => `guide${index}`)) {
     registry.register(defineCapabilityModule({
       id,
       systemPrompt: guide,
@@ -152,10 +154,10 @@ test('combined plugin guides use the separate second-level prompt budget', () =>
   )
   assert.throws(
     () => registry.register(defineCapabilityModule({
-      id: 'fourth',
+      id: 'overflow',
       systemPrompt: guide,
       capabilities: [{
-        name: 'fourth_tool',
+        name: 'overflow_tool',
         description: 'A tool.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         execute: () => ({ ok: true })
