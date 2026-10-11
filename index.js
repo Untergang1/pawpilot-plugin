@@ -12,6 +12,7 @@ import { getGroupHistory } from './lib/group-history.js'
 import { getPrivateHistory } from './lib/private-history.js'
 import { buildUserMessage, getReplyContext, getReplyText } from './lib/reply-context.js'
 import { summarizeDropped, summaryMessage } from './lib/conversation-summary.js'
+import { MESSAGES } from './lib/messages.js'
 import {
   buildGroupModelMessages,
   createAssistantGroupEvent,
@@ -45,16 +46,12 @@ function getConfig () {
 const CHATGPT_REAUTH_CODES = new Set(['NOT_LOGGED_IN', 'REAUTH_REQUIRED', 'CREDENTIALS_INVALID'])
 
 function publicErrorMessage (error) {
-  if (!(error instanceof ModelClientError)) return 'AI 服务暂时不可用，请稍后重试。'
-  if (error.code === 'API_KEY_MISSING') {
-    return 'AI 服务尚未配置 API Key。请设置 DASHSCOPE_API_KEY 或 pawpilot-plugin/config/config.yaml 中的 dashscope.apiKey。'
-  }
-  if (error.provider === 'chatgpt' && CHATGPT_REAUTH_CODES.has(error.code)) {
-    return 'AI 服务的 ChatGPT 登录已失效，请主人按 pawpilot-plugin 文档重新运行登录脚本。'
-  }
-  if (error.code === 'USAGE_LIMIT') return 'AI 服务的套餐额度暂时用尽，请稍后再试。'
-  if (error.code === 'RATE_LIMITED') return 'AI 服务当前请求过多，请稍后再试。'
-  return 'AI 服务暂时不可用，请稍后重试。'
+  if (!(error instanceof ModelClientError)) return MESSAGES.error.unavailable
+  if (error.code === 'API_KEY_MISSING') return MESSAGES.error.apiKeyMissing
+  if (error.provider === 'chatgpt' && CHATGPT_REAUTH_CODES.has(error.code)) return MESSAGES.error.chatgptReauth
+  if (error.code === 'USAGE_LIMIT') return MESSAGES.error.usageLimit
+  if (error.code === 'RATE_LIMITED') return MESSAGES.error.rateLimited
+  return MESSAGES.error.unavailable
 }
 
 function sessionScope (event, userId, groupId) {
@@ -143,9 +140,7 @@ export class pawPilot extends plugin {
     const userId = String(event.user_id)
     const groupId = event.isGroup && event.group_id ? String(event.group_id) : undefined
     conversations.reset(sessionScope(event, userId, groupId))
-    return this.reply(groupId
-      ? '已为本群开启新话题，之前的群聊记录不再作为 AI 上下文。'
-      : '已开启新话题，之前的对话不再作为 AI 上下文。', true)
+    return this.reply(groupId ? MESSAGES.resetGroup : MESSAGES.resetPrivate, true)
   }
 
   async reloadCapabilities () {
@@ -177,7 +172,7 @@ export class pawPilot extends plugin {
     const userText = typeof event.msg === 'string' ? event.msg.trim() : ''
     const { maxInputChars } = config
     if (userText.length > maxInputChars) {
-      return this.reply(`消息过长，请控制在 ${maxInputChars} 个字符以内。`, true)
+      return this.reply(MESSAGES.inputTooLong(maxInputChars), true)
     }
     const requestId = crypto.randomUUID()
     const userId = String(event.user_id)
@@ -186,7 +181,7 @@ export class pawPilot extends plugin {
 
     if (event.isGroup && groupId) {
       const rate = limiter.consume(`${event.self_id}:group:${groupId}:user:${userId}`)
-      if (!rate.ok) return this.reply('请求过于频繁，请稍后再试。', true)
+      if (!rate.ok) return this.reply(MESSAGES.rateLimited, true)
       const queued = groupQueue.enqueue(
         `bot:${event.self_id}:group:${groupId}`,
         () => this.processAgentRequest(event, {
@@ -202,13 +197,13 @@ export class pawPilot extends plugin {
         }),
         config.groupRequestQueueMaxOutstanding
       )
-      if (!queued.ok) return this.reply('当前群的 AI 请求较多，请稍后再试。', true)
+      if (!queued.ok) return this.reply(MESSAGES.groupBusy, true)
       return queued.promise
     }
 
     const lock = limiter.acquire(`${event.self_id}:private:${userId}`)
     if (!lock.ok) {
-      return this.reply(lock.reason === 'BUSY' ? '上一条 AI 请求仍在处理中。' : '请求过于频繁，请稍后再试。', true)
+      return this.reply(lock.reason === 'BUSY' ? MESSAGES.privateBusy : MESSAGES.rateLimited, true)
     }
 
     try {
@@ -279,7 +274,7 @@ export class pawPilot extends plugin {
         })
         logUsage(requestId, config.provider, 'group', result.usage)
         if (result.handled) return true
-        const text = result.text || '我没有生成可发送的回复，请换一种问法。'
+        const text = result.text || MESSAGES.emptyReply
         const sendResult = await this.reply(text, true)
         if (sendSucceeded(sendResult)) {
           conversations.appendTurn(
@@ -294,7 +289,7 @@ export class pawPilot extends plugin {
 
       const replyText = await getReplyText(event)
       const message = buildUserMessage(userText, replyText, maxInputChars)
-      if (!message) return this.reply('你好，请直接告诉我需要什么帮助。', true)
+      if (!message) return this.reply(MESSAGES.emptyMessage, true)
       const cachedHistory = conversations.getMessages(scope)
       const recoveredHistory = cachedHistory.length || config.conversationHistoryRecoveryEnabled === false
         ? []
@@ -316,7 +311,7 @@ export class pawPilot extends plugin {
       })
       logUsage(requestId, config.provider, 'private', result.usage)
       if (result.handled) return true
-      const text = result.text || '我没有生成可发送的回复，请换一种问法。'
+      const text = result.text || MESSAGES.emptyReply
       const sendResult = await this.reply(text, true)
       if (sendSucceeded(sendResult)) {
         conversations.hydrateMessages(scope, recoveredHistory)
