@@ -3,7 +3,7 @@ import test from 'node:test'
 import { createCommandDispatcher } from '../lib/command-dispatcher.js'
 
 test('command dispatcher forwards an allowed command through a cloned event', async () => {
-  const event = { user_id: '10001', group_id: '20001', msg: '帮我扫码绑定' }
+  const event = { user_id: '10001', group_id: '20001', msg: '帮我扫码绑定', message: [{ type: 'text', text: '帮我扫码绑定' }], atBot: true }
   const order = []
   event.reply = async (text, quote) => { order.push({ type: 'reply', text, quote }); return { message_id: 'pre' } }
   let dispatched
@@ -17,11 +17,15 @@ test('command dispatcher forwards an allowed command through a cloned event', as
   const result = await dispatchCommand({ command: '#phi bind qrcode', preface: '好的，我来帮你处理喵~' }, { event })
   assert.deepEqual(result, { ok: true, handled: true, reply: { text: '好的，我来帮你处理喵~', sendResult: { message_id: 'pre' } } })
   assert.notEqual(dispatched, event)
-  assert.equal(dispatched.msg, '#phi bind qrcode')
+  assert.deepEqual(dispatched.message, [{ type: 'text', text: '#phi bind qrcode' }])
+  assert.equal(dispatched.raw_message, '#phi bind qrcode')
+  assert.equal(dispatched.msg, undefined)
   assert.equal(dispatched.user_id, '10001')
   assert.equal(dispatched.group_id, '20001')
   assert.equal(dispatched.aiCommandDispatch, true)
+  assert.equal(dispatched.atBot, true)
   assert.equal(event.msg, '帮我扫码绑定')
+  assert.deepEqual(event.message, [{ type: 'text', text: '帮我扫码绑定' }])
   assert.deepEqual(order, [
     { type: 'reply', text: '好的，我来帮你处理喵~', quote: true },
     { type: 'dispatch' }
@@ -38,7 +42,7 @@ test('command dispatcher forwards any well-formed single command', async () => {
     event: { reply: async () => {} }
   })
   assert.equal(result.handled, true)
-  assert.equal(dispatched.msg, '#other status')
+  assert.equal(dispatched.raw_message, '#other status')
 })
 
 test('command dispatcher forwards commands with Chinese prefixes', async () => {
@@ -51,7 +55,7 @@ test('command dispatcher forwards commands with Chinese prefixes', async () => {
     event: { reply: async () => {} }
   })
   assert.equal(result.handled, true)
-  assert.equal(dispatched.msg, '#王者帮助')
+  assert.equal(dispatched.raw_message, '#王者帮助')
 })
 
 test('command dispatcher accepts no multi-command input', async () => {

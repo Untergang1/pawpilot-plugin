@@ -4,9 +4,10 @@
 context, and adds only registered documentation to the system prompt. Capability integrations own
 their execution lifecycle, including timeout, cancellation and any user-facing timeout reply.
 An integration may explicitly expose a command-dispatch tool; it must require a short `preface`
-argument as well as the command. The dispatcher sends the preface to the user before the command
-is accepted by the configured command-prefix allowlist and runs through Yunzai's normal plugin
-pipeline. The preface must not expose the command or describe the capability as an external plugin.
+argument as well as the command. The dispatcher sends the preface to the user, then passes a
+text-only message holding just the command from the same sender to Yunzai's `loader.deal`, so
+blacklists, cooldowns, @-only settings, permissions and the target plugin's replies apply as if the
+user had sent the command; the original message's mention and quote context is kept. The preface must not expose the command or describe the capability as an external plugin.
 
 A tool result with `handled: true` ends the request without a model reply. It may include
 `reply: { text, sendResult }` describing a user-visible message the capability already sent, such as
