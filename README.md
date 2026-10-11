@@ -92,7 +92,18 @@ groupParticipantNameEnabled: true
 groupHistoryRecoveryEnabled: true
 groupHistoryRecoveryMaxMessages: 64
 groupHistoryRecoveryMaxChars: 6000
+conversationSummaryEnabled: true
+conversationSummaryMaxChars: 800
 ```
+
+内存会话超过轮数或字符上限时，一次性丢弃最旧的内容直到降到上限的 75%，而不是每轮丢一条；这样历史前缀能在
+随后多次请求中保持不变，便于服务商的前缀缓存命中。被丢弃的文本会在回复发出后由同一后端在后台合并进该会话的
+滚动摘要（ChatGPT 使用 `low` 推理强度，不带工具，不阻塞回复），摘要不超过 `conversationSummaryMaxChars`，
+以 `[Earlier conversation summary]` 开头作为第一条上下文消息发送；摘要失败时被丢弃的文本会留待下次重试。摘要与
+会话同属进程内存，随 TTL 过期或重启清空。关闭 `conversationSummaryEnabled` 后被丢弃的内容直接舍弃。
+
+任何用户发送 `#ai 重置`（也可用 `#ai reset`、`#ai 新话题`）都会清空当前会话的内存历史和摘要：私聊只影响本人，
+群聊影响全群共享的会话。插件同时记下重置时间，之后从适配器恢复私聊或群聊历史时只采用该时间之后的消息。
 
 When a private conversation has no in-memory context, such as after a restart,
 pawpilot-plugin can recover the latest private messages through a compatible OneBot

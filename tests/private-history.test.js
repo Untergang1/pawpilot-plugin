@@ -30,6 +30,9 @@ test('private history excludes the current message, orders entries, and limits t
     { role: 'assistant', content: 'bot reply' }
   ])
   assert.deepEqual(call, [99, 4, true])
+  assert.deepEqual(await getPrivateHistory(event, 3, 15_000), [
+    { role: 'assistant', content: 'bot reply' }
+  ], 'messages at or before a reset are skipped')
 })
 
 test('private history gracefully degrades when unavailable or failing', async () => {

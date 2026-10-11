@@ -11,6 +11,7 @@ import { ConversationStore } from './lib/conversation-store.js'
 import { getGroupHistory } from './lib/group-history.js'
 import { getPrivateHistory } from './lib/private-history.js'
 import { buildUserMessage, getReplyContext, getReplyText } from './lib/reply-context.js'
+import { summarizeDropped, summaryMessage } from './lib/conversation-summary.js'
 import {
   buildGroupModelMessages,
   createAssistantGroupEvent,
@@ -99,6 +100,30 @@ function sendSucceeded (result) {
   return result !== false && result != null && !result?.error
 }
 
+function withSummary (scope, messages) {
+  const summary = summaryMessage(conversations.getSummary(scope))
+  return summary ? [summary, ...messages] : messages
+}
+
+/**
+ * Folds turns dropped by trimming into the session summary in the background, so
+ * the reply is never delayed. Failures keep the dropped text for the next attempt.
+ */
+function scheduleSummary (scope, client, config, requestId) {
+  if (config.conversationSummaryEnabled === false) return
+  const claim = conversations.takeDropped(scope)
+  if (!claim) return
+  summarizeDropped({ client, summary: claim.summary, dropped: claim.dropped, maxChars: config.conversationSummaryMaxChars })
+    .then(({ summary, usage }) => {
+      conversations.finishSummary(claim, summary)
+      logUsage(requestId, config.provider, 'summary', usage && { modelCalls: 1, ...usage })
+    })
+    .catch(error => {
+      conversations.finishSummary(claim, null)
+      global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} summary failed code=${error?.code ?? 'UNKNOWN'}`)
+    })
+}
+
 export class pawPilot extends plugin {
   constructor () {
     super({
@@ -106,8 +131,21 @@ export class pawPilot extends plugin {
       dsc: 'LLM function-calling assistant (DashScope or ChatGPT)',
       event: 'message',
       priority: 900,
-      rule: [{ reg: '^#ai\\s*reload$', fnc: 'reloadCapabilities', permission: 'master' }]
+      rule: [
+        { reg: '^#ai\\s*reload$', fnc: 'reloadCapabilities', permission: 'master' },
+        { reg: '^#ai\\s*(重置|reset|新话题)$', fnc: 'resetConversation' }
+      ]
     })
+  }
+
+  async resetConversation () {
+    const event = this.e
+    const userId = String(event.user_id)
+    const groupId = event.isGroup && event.group_id ? String(event.group_id) : undefined
+    conversations.reset(sessionScope(event, userId, groupId))
+    return this.reply(groupId
+      ? '已为本群开启新话题，之前的群聊记录不再作为 AI 上下文。'
+      : '已开启新话题，之前的对话不再作为 AI 上下文。', true)
   }
 
   async reloadCapabilities () {
@@ -212,7 +250,8 @@ export class pawPilot extends plugin {
           ? await getGroupHistory(
             event,
             config.groupHistoryRecoveryMaxMessages,
-            config.groupHistoryRecoveryMaxChars
+            config.groupHistoryRecoveryMaxChars,
+            conversations.getResetAt(scope)
           )
           : []
         const { contextMessages, currentMessage } = buildGroupModelMessages({
@@ -232,7 +271,7 @@ export class pawPilot extends plugin {
           groupId,
           isOwner: isOwner(event),
           currentMessage,
-          contextMessages,
+          contextMessages: withSummary(scope, contextMessages),
           requestId,
           cacheKey: promptCacheKey(scope),
           maxToolRounds: config.maxToolRounds,
@@ -248,6 +287,7 @@ export class pawPilot extends plugin {
             { ...currentEvent, source: 'completed_bot_turn' },
             createAssistantGroupEvent(event, text, sendResult)
           )
+          scheduleSummary(scope, client, config, requestId)
         }
         return sendResult
       }
@@ -258,7 +298,7 @@ export class pawPilot extends plugin {
       const cachedHistory = conversations.getMessages(scope)
       const recoveredHistory = cachedHistory.length || config.conversationHistoryRecoveryEnabled === false
         ? []
-        : await getPrivateHistory(event, config.conversationHistoryRecoveryMaxMessages)
+        : await getPrivateHistory(event, config.conversationHistoryRecoveryMaxMessages, conversations.getResetAt(scope))
       const result = await runFunctionCalling({
         client,
         registry: registryLoader.registry,
@@ -268,7 +308,7 @@ export class pawPilot extends plugin {
         groupId,
         isOwner: isOwner(event),
         userMessage: message,
-        contextMessages: cachedHistory.length ? cachedHistory : recoveredHistory,
+        contextMessages: withSummary(scope, cachedHistory.length ? cachedHistory : recoveredHistory),
         requestId,
         cacheKey: promptCacheKey(scope),
         maxToolRounds: config.maxToolRounds,
@@ -281,6 +321,7 @@ export class pawPilot extends plugin {
       if (sendSucceeded(sendResult)) {
         conversations.hydrateMessages(scope, recoveredHistory)
         conversations.appendExchange(scope, message, text)
+        scheduleSummary(scope, client, config, requestId)
       }
       return sendResult
     } catch (error) {

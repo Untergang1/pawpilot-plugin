@@ -28,6 +28,8 @@ test('group history keeps messages before the @Bot request in chronological orde
   assert.deepEqual(parameters, [20, 4, true])
   assert.deepEqual(history.map(message => message.role), ['user', 'assistant', 'user'])
   assert.equal(history[0].senderName, 'Alice')
+  assert.deepEqual((await getGroupHistory(event, 3, 4000, 20_000)).map(message => message.content), ['third'],
+    'messages at or before a reset are skipped')
   assert.equal(history[0].participantName, 'member_first')
   assert.equal(history[1].senderName, 'Bot card')
   assert.equal(history[1].participantName, 'bot')

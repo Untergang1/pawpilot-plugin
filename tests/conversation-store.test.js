@@ -79,3 +79,38 @@ test('group turns retain message metadata and are cloned on read', () => {
   turns[0].user.reply.content = 'changed'
   assert.equal(store.getTurns(scope)[0].user.reply.content, 'quoted text')
 })
+
+test('trimming drops a chunk down to three quarters of the limits and queues it for summary', () => {
+  const store = new ConversationStore({ maxTurns: 4 })
+  for (const name of ['a', 'b', 'c', 'd', 'e']) store.appendExchange(privateScope, name, `${name}!`)
+  assert.deepEqual(store.getMessages(privateScope).map(message => message.content), ['c', 'c!', 'd', 'd!', 'e', 'e!'])
+  store.appendExchange(privateScope, 'f', 'f!')
+  assert.equal(store.getMessages(privateScope).length, 8, 'no trim until the hard limit is exceeded again')
+
+  const claim = store.takeDropped(privateScope)
+  assert.deepEqual(claim.dropped, ['user: a', 'assistant: a!', 'user: b', 'assistant: b!'])
+  assert.equal(store.takeDropped(privateScope), null, 'one summary at a time')
+  store.finishSummary(claim, 'a and b were discussed')
+  assert.equal(store.getSummary(privateScope), 'a and b were discussed')
+})
+
+test('a failed summary requeues the dropped text', () => {
+  const store = new ConversationStore({ maxTurns: 1 })
+  store.appendExchange(privateScope, 'a', 'a!')
+  store.appendExchange(privateScope, 'b', 'b!')
+  const claim = store.takeDropped(privateScope)
+  store.finishSummary(claim, null)
+  assert.deepEqual(store.takeDropped(privateScope).dropped, ['user: a', 'assistant: a!'])
+  assert.equal(store.getSummary(privateScope), '')
+})
+
+test('reset clears history and summary and records the reset time', () => {
+  const store = new ConversationStore()
+  assert.equal(store.getResetAt(privateScope), 0)
+  store.appendExchange(privateScope, 'a', 'a!')
+  const before = Date.now()
+  store.reset(privateScope)
+  assert.deepEqual(store.getMessages(privateScope), [])
+  assert.ok(store.getResetAt(privateScope) >= before)
+  assert.equal(store.getResetAt({ selfId: 'bot', userId: 'other' }), 0)
+})
