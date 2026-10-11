@@ -3,7 +3,8 @@ import cfg from '../../lib/config/config.js'
 import { CapabilityModuleLoader } from './lib/capability-loader.js'
 import { getAgentConfig } from './lib/config.js'
 import { QwenClient, QwenClientError } from './lib/qwen-client.js'
-import { CodexClient, CodexClientError } from './lib/codex-client.js'
+import { ChatGPTClient, ChatGPTClientError } from './lib/chatgpt-client.js'
+import { ChatGPTAuthError } from './lib/chatgpt-auth.js'
 import { RequestLimiter } from './lib/rate-limit.js'
 import { GroupRequestQueue } from './lib/group-request-queue.js'
 import { runFunctionCalling } from './lib/agent-runner.js'
@@ -42,13 +43,15 @@ function positiveInteger (value, fallback) {
 }
 
 function createModelClient (config) {
-  if (config.provider === 'codex') {
-    const codex = config.codex ?? {}
-    return new CodexClient({
-      codexHome: typeof codex.home === 'string' && codex.home ? codex.home : undefined,
-      model: typeof codex.model === 'string' ? codex.model : undefined,
-      reasoningEffort: typeof codex.reasoningEffort === 'string' ? codex.reasoningEffort : undefined,
-      timeoutMs: positiveInteger(codex.requestTimeoutMs, 120_000)
+  if (config.provider === 'chatgpt') {
+    const chatgpt = config.chatgpt ?? {}
+    return new ChatGPTClient({
+      credentialsFile: typeof chatgpt.credentialsFile === 'string' && chatgpt.credentialsFile
+        ? chatgpt.credentialsFile
+        : undefined,
+      model: typeof chatgpt.model === 'string' ? chatgpt.model : undefined,
+      reasoningEffort: typeof chatgpt.reasoningEffort === 'string' ? chatgpt.reasoningEffort : undefined,
+      timeoutMs: positiveInteger(chatgpt.requestTimeoutMs, 60_000)
     })
   }
   if (config.provider !== undefined && config.provider !== 'dashscope') {
@@ -69,8 +72,12 @@ function publicErrorMessage (error) {
   if (error instanceof QwenClientError && error.code === 'API_KEY_MISSING') {
     return 'AI 服务尚未配置 API Key。请设置 DASHSCOPE_API_KEY 或 pawpilot-plugin/config/config.yaml 中的 dashscope.apiKey。'
   }
-  if (error instanceof CodexClientError && error.code === 'CODEX_NOT_LOGGED_IN') {
-    return 'AI 服务的 Codex 尚未登录，请主人按 pawpilot-plugin 文档完成 codex login。'
+  if (error instanceof ChatGPTAuthError &&
+      ['NOT_LOGGED_IN', 'REAUTH_REQUIRED', 'CREDENTIALS_INVALID'].includes(error.code)) {
+    return 'AI 服务的 ChatGPT 登录已失效，请主人按 pawpilot-plugin 文档重新运行登录脚本。'
+  }
+  if (error instanceof ChatGPTClientError && error.code === 'USAGE_LIMIT') {
+    return 'AI 服务的 ChatGPT 套餐额度暂时用尽，请稍后再试。'
   }
   return 'AI 服务暂时不可用，请稍后重试。'
 }
@@ -115,7 +122,7 @@ export class pawPilot extends plugin {
   constructor () {
     super({
       name: 'PawPilot',
-      dsc: 'LLM function-calling assistant (DashScope or Codex)',
+      dsc: 'LLM function-calling assistant (DashScope or ChatGPT)',
       event: 'message',
       priority: 900,
       rule: [{ reg: '^#ai\\s*reload$', fnc: 'reloadCapabilities', permission: 'master' }]

@@ -12,7 +12,7 @@ Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力
 - `dashscope`（默认）：`dashscope.baseURL`、`dashscope.model`、`dashscope.apiKey`、`dashscope.requestTimeoutMs`，
   调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程环境中设置 `DASHSCOPE_API_KEY`，它优先于
   `dashscope.apiKey`。
-- `codex`：`codex.home`、`codex.model`、`codex.reasoningEffort`、`codex.requestTimeoutMs`，见下文。
+- `chatgpt`：`chatgpt.credentialsFile`、`chatgpt.model`、`chatgpt.reasoningEffort`、`chatgpt.requestTimeoutMs`，见下文。
 
 其余顶层字段（能力模块、输入上限、工具轮数、限流、会话与历史恢复等）对两种后端都生效。
 
@@ -28,31 +28,35 @@ Phi 或王者荣耀意图时会调用对应工具，再交给目标插件的原�
 `prompts/GROUP_SYSTEM_PROMPT.md` 场景提示词会在每次 AI 请求时按需读取，修改后无需执行此命令。普通用户只看到
 普通能力，`ownerOnly` 能力会在展示和调用两处拦截。
 
-### 使用 Codex 订阅额度
+### 使用 ChatGPT 套餐额度
 
-将 `provider` 设为 `codex` 后，pawpilot-plugin 通过 [`@openai/codex-sdk`](https://www.npmjs.com/package/@openai/codex-sdk)
-调用 Codex，消耗 ChatGPT 订阅额度而非 API 计费，且与同一账号的其他 Codex 使用共享额度和速率限制。先在 Yunzai
-根目录执行 `pnpm install` 安装插件依赖，再为 bot 准备专用的 `CODEX_HOME` 并登录一次：
+将 `provider` 设为 `chatgpt` 后，pawpilot-plugin 通过 OpenAI 面向开源与本地部署应用的
+[Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) 流程获得 OAuth 凭据，直接调用公开的
+`https://api.openai.com/v1/responses`，消耗所登录账号的 ChatGPT 套餐额度而非 API 计费。该能力仍处于预览阶段，账号是否具备套餐使用
+资格以登录授权结果为准。
+
+首次使用前在 Yunzai 根目录登录一次：
 
 ```bash
-mkdir -p ~/.codex-pawpilot
-CODEX_HOME=~/.codex-pawpilot codex login --device-auth
+node plugins/pawpilot-plugin/scripts/chatgpt-login.js
 ```
 
-`codex.home` 必须是 bot 专用目录：个人 `~/.codex` 中的插件、MCP server 和 `AGENTS.md` 会被 Codex 加载，
-其中 MCP 与插件在沙箱外运行。Codex 子进程不会继承 `OPENAI_API_KEY` 和 `CODEX_API_KEY`，以确保使用订阅登录。
+脚本在 `127.0.0.1:1455` 监听回调并打印授权链接（`--port` 可改端口），在同一台机器的浏览器中打开并同意授权即可；
+凭据以 600 权限写入 `chatgpt.credentialsFile`（默认 `~/.pawpilot-chatgpt/credentials.json`）。服务器没有浏览器时，
+先在本地执行 `ssh -L 1455:127.0.0.1:1455 <服务器>` 转发端口再打开链接。首次登录会动态注册客户端，再次运行脚本时
+复用凭据中的 client ID 与 host ID 重新授权。凭据文件每次请求都会重新读取，重新登录后无需重启 Bot。
 
-Codex 是 agent 而非 chat-completions 接口，插件按以下方式把它当作纯推理后端：
+请求按以下方式与 `runFunctionCalling` 的 chat-completions 约定互相转换（`lib/chatgpt-client.js`）：
 
-- 每轮工具调用对应一次无状态的 Codex turn。系统提示词、可用函数清单与输出协议写入临时的
-  `model_instructions_file`，替换 Codex 默认的编程 agent 指令；对话与函数结果序列化为 transcript 作为输入。
-- 输出由 JSON Schema 约束为 `{ reply, tool_calls }`，再转换为 OpenAI 风格的 assistant 消息，
-  因此工具循环、权限检查与审计仍由 `runFunctionCalling` 负责。输出无法解析时本次请求失败。
-- 权限配置拒绝全部文件系统访问并限制网络，Codex 自带的 shell 和改文件工具无法执行；web search 关闭。
-- 通过 feature 开关关闭 shell、子智能体、插件、apps、图像、浏览器等内置工具，并去掉 skills、apps、协作模式说明
-  与环境上下文（工作目录、日期等），每轮输入 token 约减半。模型目录决定的多智能体角色说明无法关闭，仍会注入。
-- 每轮都会启动一次 Codex CLI，单轮通常需要数秒到十余秒，超时由 `codex.requestTimeoutMs` 控制。Codex
-  会在 `codex.home` 下保存每轮的会话记录，可按需清理。
+- system 消息合并为 `instructions`；assistant 的 `tool_calls` 与 tool 消息分别转为 `function_call` 和
+  `function_call_output` 输入项；工具定义转为 Responses 的 function 工具。群聊消息的 `name` 字段没有对应项，
+  以 `[participant <name>]` 前缀写入消息正文。
+- 预览接口要求 `store: false` 与 `stream: true`，且拒绝 `temperature`、`max_output_tokens` 等采样字段；插件读取
+  SSE 流，从 `response.output_item.done` 收集输出，只有收到 `response.completed` 才视为成功。
+- 访问令牌有效期约 1 小时，距过期 5 分钟内自动刷新；refresh token 每次刷新都会轮换，进程内串行刷新并原子写回
+  凭据文件。请求返回 401 时强制刷新并重试一次；刷新被拒时需重新运行登录脚本。
+- 套餐额度用尽（`subscription_sharing_usage_limit_exceeded` / `subscription_sharing_usage_unavailable`）时向用户
+  提示稍后再试。
 
 ## 聊天人格与短期上下文
 

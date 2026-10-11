@@ -7,7 +7,7 @@
 enabled: true
 
 # ───────────── 模型后端 ─────────────
-# provider 选择后端：dashscope 或 codex。省略时为 dashscope；其他值会使请求失败。
+# provider 选择后端：dashscope 或 chatgpt。省略时为 dashscope；其他值会使请求失败。
 # 只读取与 provider 同名的小节，另一个小节被忽略。
 provider: dashscope
 
@@ -25,18 +25,17 @@ dashscope:
   # 不包含排队时间，也不限制能力工具/目标插件的执行时间。
   requestTimeoutMs: 30000
 
-# provider 为 codex 时的设置：通过 Codex SDK 使用 ChatGPT 订阅额度。
-codex:
-  # bot 专用的 CODEX_HOME，仅存放登录态与 Codex 会话记录；不要指向个人的 ~/.codex，
-  # 否则个人配置中的插件、MCP server 与 AGENTS.md 会被加载进 bot 请求。支持 ~ 开头。
-  # 首次使用前登录一次：CODEX_HOME=~/.codex-pawpilot codex login --device-auth
-  home: "~/.codex-pawpilot"
-  # 模型 ID；留空时使用 Codex 默认模型。
-  model: ""
-  # 推理强度，例如 minimal、low、medium、high；聊天场景建议 low。
+# provider 为 chatgpt 时的设置：通过 Sign in with ChatGPT 使用 ChatGPT 套餐额度调用 Responses API。
+chatgpt:
+  # 登录凭据文件，由登录脚本写入并在刷新 token 时更新；支持 ~ 开头，文件权限为 600，切勿提交或外传。
+  # 首次使用前在 Yunzai 根目录登录一次：node plugins/pawpilot-plugin/scripts/chatgpt-login.js
+  credentialsFile: "~/.pawpilot-chatgpt/credentials.json"
+  # 模型 ID，必须是该账号可用的模型（GET https://api.openai.com/v1/models 中 visibility 为 list 的 slug）。
+  model: "gpt-6.1-sol"
+  # 推理强度，例如 low、medium、high；聊天场景建议 low。
   reasoningEffort: low
-  # 单轮 Codex 调用超时，单位毫秒；每轮会启动一次 Codex CLI，耗时明显高于 HTTP 接口。
-  requestTimeoutMs: 120000
+  # 单次模型请求（含流式读取）的超时时间，单位毫秒；作用于每一轮模型请求。
+  requestTimeoutMs: 60000
 
 # ───────────── 以下为两种后端共用的设置 ─────────────
 
@@ -51,7 +50,7 @@ capabilityModules:
 # 私聊中，引用内容与当前消息组合后的模型输入也受此预算约束；群聊当前事件会按此值裁剪。
 maxInputChars: 3000
 
-# 单次对话请求最多执行多少轮工具调用；一轮中可以包含多个工具调用。dashscope 与 codex 均受此限制。
+# 单次对话请求最多执行多少轮工具调用；一轮中可以包含多个工具调用。dashscope 与 chatgpt 均受此限制。
 # 达到上限后不再执行模型继续提出的工具。该值不是 HTTP 请求次数，也不限制目标插件自身流程。
 maxToolRounds: 4
 
