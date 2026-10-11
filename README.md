@@ -54,6 +54,11 @@ node plugins/pawpilot-plugin/scripts/chatgpt-login.js
   以 `[participant <name>]` 前缀写入消息正文。
 - 预览接口要求 `store: false` 与 `stream: true`，且拒绝 `temperature`、`max_output_tokens` 等采样字段；插件读取
   SSE 流，从 `response.output_item.done` 收集输出，只有收到 `response.completed` 才视为成功。
+- 设置了 `reasoningEffort` 时请求附带 `include: ["reasoning.encrypted_content"]`。模型在发起工具调用的那一轮产生的
+  加密推理项会挂在 assistant 消息的 `reasoning_items` 上，下一轮以不带 `id` 的 `reasoning` 输入项原样回传，避免
+  `store: false` 下每个工具轮重新推理；这些推理项只存在于单次请求的工具循环中，不进入会话历史。
+- 每个请求带 `prompt_cache_key`，取值为“机器人 + 群”或“机器人 + 私聊用户”的 SHA-256 摘要，使同一会话的请求
+  落到同一前缀缓存，且不向服务商发送原始 QQ/微信号。
 - 访问令牌有效期约 1 小时，距过期 5 分钟内自动刷新；refresh token 每次刷新都会轮换，进程内串行刷新并原子写回
   凭据文件。请求返回 401 时强制刷新并重试一次；刷新被拒时需重新运行登录脚本。返回 5xx 时视为临时故障再重试一次，
   两次请求共用同一超时。

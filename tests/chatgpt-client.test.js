@@ -9,7 +9,7 @@ import {
   completeAuthorization,
   createAuthorization
 } from '../lib/chatgpt-auth.js'
-import { ChatGPTClient, ChatGPTClientError, buildResponsesRequest } from '../lib/chatgpt-client.js'
+import { ChatGPTClient, ChatGPTClientError, buildResponsesRequest, toAssistantMessage } from '../lib/chatgpt-client.js'
 
 function jwt (payload) {
   const part = value => Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -69,6 +69,41 @@ test('request conversion maps chat messages to Responses input items', () => {
     { role: 'assistant', content: '好了' }
   ])
   assert.equal(buildResponsesRequest({ model: 'm', messages: [] }).tools, undefined)
+})
+
+test('request replays encrypted reasoning and forwards the prompt cache key', () => {
+  const body = buildResponsesRequest({
+    model: 'gpt-test',
+    reasoningEffort: 'low',
+    cacheKey: 'pawpilot-abc',
+    messages: [
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: null,
+        reasoning_items: [{ summary: [], encrypted_content: 'enc' }],
+        tool_calls: [{ id: 'call_a', function: { name: 'read_status', arguments: '{}' } }]
+      }
+    ]
+  })
+  assert.deepEqual(body.include, ['reasoning.encrypted_content'])
+  assert.equal(body.prompt_cache_key, 'pawpilot-abc')
+  assert.deepEqual(body.input.slice(1), [
+    { type: 'reasoning', summary: [], encrypted_content: 'enc' },
+    { type: 'function_call', call_id: 'call_a', name: 'read_status', arguments: '{}' }
+  ])
+  const plain = buildResponsesRequest({ model: 'm', messages: [] })
+  assert.equal(plain.include, undefined)
+  assert.equal(plain.prompt_cache_key, undefined)
+})
+
+test('tool-call replies keep encrypted reasoning items without their ids', () => {
+  const message = toAssistantMessage([
+    { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'enc' },
+    { type: 'function_call', call_id: 'call_x', name: 'read_status', arguments: '{}' }
+  ])
+  assert.deepEqual(message.reasoning_items, [{ summary: [], encrypted_content: 'enc' }])
+  assert.equal(toAssistantMessage([{ type: 'reasoning', encrypted_content: 'enc' }]).reasoning_items, undefined)
 })
 
 test('client streams a function call and returns OpenAI-style tool calls', async () => {

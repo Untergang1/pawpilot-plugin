@@ -86,6 +86,13 @@ function sessionScope (event, userId, groupId) {
   return { selfId: event.self_id, userId, groupId }
 }
 
+// Routes requests from one conversation to the same provider prompt cache without
+// sending raw QQ/WeChat identifiers to the model provider.
+function promptCacheKey ({ selfId, userId, groupId }) {
+  const raw = groupId ? `${selfId}:group:${groupId}` : `${selfId}:private:${userId}`
+  return `pawpilot-${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32)}`
+}
+
 async function ensureCapabilities (moduleIds, moduleKey) {
   if (moduleKey === loadedModuleKey) return
   registryLoader.moduleIds = moduleIds
@@ -253,6 +260,7 @@ export class pawPilot extends plugin {
           currentMessage,
           contextMessages,
           requestId,
+          cacheKey: promptCacheKey(scope),
           maxToolRounds: config.maxToolRounds,
           audit
         })
@@ -288,6 +296,7 @@ export class pawPilot extends plugin {
         userMessage: message,
         contextMessages: cachedHistory.length ? cachedHistory : recoveredHistory,
         requestId,
+        cacheKey: promptCacheKey(scope),
         maxToolRounds: config.maxToolRounds,
         audit
       })
