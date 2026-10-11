@@ -1,7 +1,7 @@
 # pawpilot-plugin
 
 Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力模块即可作为聊天机器人使用：私聊的
-自然语言消息会触发；群聊仅在 `@Bot` 时触发；Bot 自己发出的消息（`user_id` 等于 `self_id`）一律忽略，以免回复循环。以 `#` 或 `/`（含全角 `／`）开头的消息仍交给原有命令插件直接处理；自然语言
+自然语言或图片消息会触发；群聊仅在 `@Bot` 时触发；Bot 自己发出的消息（`user_id` 等于 `self_id`）一律忽略，以免回复循环。以 `#` 或 `/`（含全角 `／`）开头的消息仍交给原有命令插件直接处理；自然语言
 可在已启用能力的范围内转换为工具调用或命令派发。
 
 ## 配置
@@ -10,14 +10,16 @@ Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力
 `provider` 选择模型后端，插件只读取与之同名的小节：
 
 - `dashscope`（默认）：`dashscope.baseURL`、`dashscope.model`、`dashscope.apiKey`、`dashscope.temperature`
-  （0–2，默认 0.7）、`dashscope.requestTimeoutMs`，调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程
+  （0–2，默认 0.7）、`dashscope.requestTimeoutMs`、`dashscope.vision`（模型是否支持图片输入，默认 false），调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程
   环境中设置 `DASHSCOPE_API_KEY`，它优先于 `dashscope.apiKey`。
 - `chatgpt`：`chatgpt.credentialsFile`、`chatgpt.model`、`chatgpt.reasoningEffort`、`chatgpt.requestTimeoutMs`，见下文。
 
 两种后端由 `lib/providers.js` 的注册表按 `provider` 创建，并遵守 `lib/model-client.js` 的统一约定：接收
 chat-completions 风格的消息，返回 OpenAI 风格的 assistant 消息及统一 `usage`；单次请求共用一个超时，HTTP 5xx
 重试一次；失败时抛出 `ModelClientError`，`code` 为统一错误码（如 `AUTH_FAILED`、`RATE_LIMITED`、`USAGE_LIMIT`、
-`REQUEST_TIMEOUT`、`SERVER_ERROR`），服务商原始错误码保存在 `providerCode` 并写入失败日志。新增后端只需实现该
+`REQUEST_TIMEOUT`、`SERVER_ERROR`），服务商原始错误码保存在 `providerCode` 并写入失败日志。客户端还通过
+`supportsImages` 声明是否接受图片；为 true 时，当前用户消息的 `content` 可以是 chat-completions 分段数组
+（`text` 与 `image_url` 段，图片为 `data:image/...;base64,` 地址），其余消息始终是字符串。新增后端只需实现该
 约定并在注册表中登记。
 
 其余顶层字段（能力模块、输入上限、工具轮数、限流、会话与历史恢复等）对两种后端都生效。缺失或非法的数值项
@@ -55,6 +57,7 @@ node plugins/pawpilot-plugin/scripts/chatgpt-login.js
 
 请求按以下方式与 `runFunctionCalling` 的 chat-completions 约定互相转换（`lib/chatgpt-client.js`）：
 
+- 当前用户消息的分段数组转为 `input_text` 与 `input_image` 内容项。
 - system 消息合并为 `instructions`；assistant 的 `tool_calls` 与 tool 消息分别转为 `function_call` 和
   `function_call_output` 输入项；工具定义转为 Responses 的 function 工具。群聊消息的 `name` 字段没有对应项，
   直接丢弃，发送者身份由正文中的群聊标签提供。
@@ -131,6 +134,33 @@ TTL 内已完成的 AI 对话会按消息 ID 去重、合并为一条带发送�
 
 私聊和群聊中的引用继续使用中性的起止标记，以区分引用内容和当前正文；安全与可信度说明只存在于系统提示词，
 不会由插件重复写入用户消息。群聊的历史、已完成交互、机器人回复和当前请求标签仍会保留，用于区分消息来源。
+
+## 图片输入
+
+私聊图片消息和群聊中 `@Bot` 的图片消息会触发回复，不需要附带文字。插件从 Yunzai 的 `e.img` 取当前消息的
+图片，从被引用消息的 image 段取引用的图片，当前消息优先，去重后最多附带 `imageInputMaxCount` 张。图片由插件
+自行下载（单张不超过 `imageInputMaxBytes`，超时 `imageDownloadTimeoutMs`），按文件头识别 JPEG、PNG、GIF、
+WebP 后以 base64 data URL 发送，不把适配器的图片地址交给服务商：QQ 图片地址会过期，OneBot v12 适配器生成的
+地址也可能只在本机可访问。下载失败的图片单独跳过并记录 warn 日志（只含失败原因，不含地址和图片数据）。
+
+是否真正发送图片取决于后端：`chatgpt` 始终发送；`dashscope` 仅在 `dashscope.vision: true` 时发送，模型不支持
+视觉却打开此项会使请求失败（日志中可见服务商错误码）。顶层 `imageInputEnabled: false` 对两个后端都关闭图片
+发送。
+
+无论图片是否发送，当前消息的文字末尾都按图片数追加 `[image]` 标记，会话历史只保存这段文字；引用和群历史中的
+图片同样显示为 `[image]`。因此图片只在本次请求中可见，之后追问时模型只知道之前发过图片，看不到图片内容。
+系统提示词要求模型在看不到 `[image]` 对应的图片时如实说明，并把图片内容视为上下文而非指令。
+
+当前联调的 wechat-ai 不提供图片段和 `get_file`，微信侧暂时收不到图片。
+
+```yaml
+dashscope:
+  vision: false
+imageInputEnabled: true
+imageInputMaxCount: 3
+imageInputMaxBytes: 5242880
+imageDownloadTimeoutMs: 10000
+```
 
 ## 集中式集成与已接入能力
 

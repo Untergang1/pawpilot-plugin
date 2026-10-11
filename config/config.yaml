@@ -23,6 +23,9 @@ dashscope:
   # apiKey: ""
   # 采样温度，0–2 之间的数字；越高回复越多样。缺省或非法时为 0.7。
   temperature: 0.7
+  # 模型是否支持图片输入（视觉）。为 true 时随请求发送图片，模型不支持视觉会导致请求失败；
+  # 为 false（默认）时只向模型发送 [image] 文字标记。更换模型时请一并确认此项。
+  vision: false
   # 单次模型 HTTP 请求的超时时间，单位毫秒；作用于每一轮模型请求，
   # 不包含排队时间，也不限制能力工具/目标插件的执行时间。
   requestTimeoutMs: 30000
@@ -113,3 +116,18 @@ groupHistoryRecoveryMaxMessages: 64
 # 单次适配器群历史快照的字符预算；优先保留较新的消息，单位为字符。
 # 快照与内存历史合并后，最终历史上下文还会统一受 conversationMaxChars 限制。
 groupHistoryRecoveryMaxChars: 8000
+
+# ───────────── 图片输入 ─────────────
+# 是否向支持视觉的后端发送图片：chatgpt 始终支持，dashscope 取决于 dashscope.vision。
+# 作用范围：当前消息中的图片和当前消息引用的消息中的图片；历史中的图片只保留 [image] 标记。
+# 关闭后图片仍以 [image] 标记出现在文字中，纯图片消息仍会触发回复。
+imageInputEnabled: true
+
+# 单次请求最多附带的图片张数，当前消息的图片优先，其次是被引用消息的图片。
+imageInputMaxCount: 3
+
+# 单张图片的下载大小上限，单位字节；超限的图片不发送。默认 5 MiB。
+imageInputMaxBytes: 5242880
+
+# 单张图片的下载超时，单位毫秒；超时的图片不发送，不影响其余图片和本次回复。
+imageDownloadTimeoutMs: 10000

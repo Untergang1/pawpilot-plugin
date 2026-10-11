@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildUserMessage, getReplyContext, getReplyText, replyToText } from '../lib/reply-context.js'
+import { buildUserMessage, getReplyContext, replyToText } from '../lib/reply-context.js'
 
 test('reply context converts Yunzai message segments to text', () => {
   const text = replyToText({
@@ -22,24 +22,20 @@ test('reply context returns structured sender information and degrades to an id'
       message_id: '42',
       user_id: '10001',
       sender: { card: 'Alice' },
-      message: [{ type: 'text', text: 'quoted' }]
+      message: [{ type: 'text', text: 'quoted' }, { type: 'image', url: 'https://example.test/q.jpg' }]
     })
   }), {
     messageId: '42',
     senderId: '10001',
     senderName: 'Alice',
-    content: 'quoted',
-    available: true
+    content: 'quoted[image]',
+    available: true,
+    imageUrls: ['https://example.test/q.jpg']
   })
   assert.deepEqual(await getReplyContext({
     reply_id: '42',
     getReply: async () => { throw new Error('unavailable') }
   }), { messageId: '42', content: '', available: false })
-})
-
-test('reply context obtains the quoted message without propagating fetch errors', async () => {
-  assert.equal(await getReplyText({ reply_id: '42', getReply: async () => ({ message: [{ type: 'text', text: 'quoted' }] }) }), 'quoted')
-  assert.equal(await getReplyText({ reply_id: '42', getReply: async () => { throw new Error('unavailable') } }), '')
 })
 
 test('reply context uses neutral quote boundaries and respects the input budget', () => {

@@ -72,6 +72,34 @@ test('request conversion maps chat messages to Responses input items', () => {
   assert.equal(buildResponsesRequest({ model: 'm', messages: [] }).tools, undefined)
 })
 
+test('request conversion maps image content parts to input_text and input_image', () => {
+  const body = buildResponsesRequest({
+    model: 'gpt-test',
+    messages: [
+      { role: 'user', content: 'earlier [image]' },
+      {
+        role: 'user',
+        name: 'u1',
+        content: [
+          { type: 'text', text: '看看这张图\n[image]' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }
+        ]
+      }
+    ]
+  })
+  assert.deepEqual(body.input, [
+    { role: 'user', content: 'earlier [image]' },
+    {
+      role: 'user',
+      content: [
+        { type: 'input_text', text: '看看这张图\n[image]' },
+        { type: 'input_image', image_url: 'data:image/png;base64,AA==' }
+      ]
+    }
+  ])
+  assert.equal(new ChatGPTClient({ credentials: {} }).supportsImages, true)
+})
+
 test('request replays encrypted reasoning and forwards the prompt cache key', () => {
   const body = buildResponsesRequest({
     model: 'gpt-test',

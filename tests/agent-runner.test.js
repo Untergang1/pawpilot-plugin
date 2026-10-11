@@ -183,6 +183,45 @@ test('function calling places one validated context stream before a named curren
   assert.equal(request.at(-1).name, 'member_10001')
 })
 
+test('function calling accepts inline images only on the current request', async () => {
+  const image = { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }
+  const run = currentMessage => {
+    let request
+    return runFunctionCalling({
+      client: {
+        async complete ({ messages }) {
+          request = [...messages]
+          return { content: 'ok' }
+        }
+      },
+      registry: new CapabilityRegistry(),
+      conversationType: 'private',
+      event: { user_id: '10001' },
+      userId: '10001',
+      isOwner: false,
+      contextMessages: [
+        { role: 'user', content: [{ type: 'text', text: 'old' }, image] },
+        { role: 'assistant', content: 'kept' }
+      ],
+      currentMessage,
+      requestId: 'request-images'
+    }).then(() => request)
+  }
+
+  const request = await run({ role: 'user', name: 'member_1', content: [{ type: 'text', text: 'what is this\n[image]' }, image] })
+  assert.deepEqual(request.slice(1), [
+    { role: 'assistant', content: 'kept' },
+    { role: 'user', name: 'member_1', content: [{ type: 'text', text: 'what is this\n[image]' }, image] }
+  ])
+  for (const content of [
+    [{ type: 'text', text: 'remote' }, { type: 'image_url', image_url: { url: 'https://a.test/x.png' } }],
+    [image],
+    [{ type: 'text', text: 'audio' }, { type: 'input_audio' }]
+  ]) {
+    await assert.rejects(run({ role: 'user', content }), error => error.code === 'INVALID_CURRENT_MESSAGE')
+  }
+})
+
 test('a dispatched command ends the function-calling loop without an AI follow-up reply', async () => {
   const registry = new CapabilityRegistry()
   registry.register(defineCapabilityModule({
@@ -331,6 +370,8 @@ test('Qwen client retries once on HTTP 5xx and sends the configured temperature'
 
 test('provider registry builds the configured client and rejects unknown providers', () => {
   assert.ok(createModelClient({ provider: 'dashscope', dashscope: { apiKey: 'k', model: 'm', requestTimeoutMs: 1000 } }) instanceof QwenClient)
+  assert.equal(createModelClient({ provider: 'dashscope', dashscope: { apiKey: 'k' } }).supportsImages, false)
+  assert.equal(createModelClient({ provider: 'dashscope', dashscope: { apiKey: 'k', vision: true } }).supportsImages, true)
   assert.throws(() => createModelClient({ provider: 'nope' }), error => error.code === 'INVALID_PROVIDER')
   assert.throws(() => createModelClient({ provider: 'toString' }), error => error.code === 'INVALID_PROVIDER')
 })

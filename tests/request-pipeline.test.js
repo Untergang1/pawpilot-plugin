@@ -27,10 +27,15 @@ function groupEvent (msg, extra = {}) {
   }
 }
 
-function setup ({ runner, config = {}, client = {}, sendResult = { message_id: 'sent' } } = {}) {
+function setup ({ runner, config = {}, client = {}, sendResult = { message_id: 'sent' }, downloader } = {}) {
   const calls = []
   const replies = []
+  const downloads = []
   const pipeline = createRequestPipeline({
+    downloader: async (urls, options) => {
+      downloads.push({ urls, options })
+      return downloader ? downloader(urls, options) : { images: urls.map((_url, index) => `data:image/png;base64,${index}`), failures: [] }
+    },
     getRegistry: async () => ({}),
     isOwner: () => false,
     createClient: () => client,
@@ -48,6 +53,7 @@ function setup ({ runner, config = {}, client = {}, sendResult = { message_id: '
     pipeline,
     calls,
     replies,
+    downloads,
     handle: event => pipeline.handle(event, normalizeConfig({ conversationHistoryRecoveryEnabled: false, groupHistoryRecoveryEnabled: false, ...config }), reply)
   }
 }
@@ -177,4 +183,47 @@ test('reset clears the conversation and summary for that scope only', async () =
   await handle(groupEvent('h'))
   assert.equal(calls[3].contextMessages.length, 2, 'the group conversation is untouched')
   assert.equal(pipeline.reset(groupEvent('#ai 重置')), MESSAGES.resetGroup)
+})
+
+test('image-only messages trigger and attach downloaded images for vision clients', async () => {
+  const { handle, calls, downloads } = setup({ client: { supportsImages: true } })
+  assert.equal(await handle(groupEvent('', { img: ['https://a.test/1.png'], atBot: false })), false)
+  await handle(privateEvent('', { img: ['https://a.test/1.png', 'https://a.test/2.png'] }))
+  assert.deepEqual(downloads[0].urls, ['https://a.test/1.png', 'https://a.test/2.png'])
+  assert.deepEqual(downloads[0].options, { maxBytes: 5 * 1024 * 1024, timeoutMs: 10_000 })
+  const [text, ...images] = calls[0].currentMessage.content
+  assert.match(text.text, new RegExp(`${TIME_LINE.source}\\[image\\]\\[image\\]$`))
+  assert.deepEqual(images.map(part => part.image_url.url), ['data:image/png;base64,0', 'data:image/png;base64,1'])
+
+  await handle(privateEvent('and now?'))
+  assert.deepEqual(calls[1].contextMessages[0], { role: 'user', content: '[image][image]' }, 'history keeps only the markers')
+})
+
+test('images are not downloaded when the client lacks vision or image input is disabled', async () => {
+  for (const options of [{}, { client: { supportsImages: true }, config: { imageInputEnabled: false } }]) {
+    const { handle, calls, downloads } = setup(options)
+    await handle(privateEvent('look', { img: ['https://a.test/1.png'] }))
+    assert.equal(downloads.length, 0)
+    assert.match(calls[0].currentMessage.content, /look\n\[image\]$/)
+  }
+})
+
+test('quoted images are fetched with the quote once and failed downloads fall back to text', async () => {
+  let fetches = 0
+  const getReply = async () => {
+    fetches += 1
+    return { message_id: 'q1', user_id: 'u2', message: [{ type: 'text', text: 'see' }, { type: 'image', url: 'https://a.test/q.png' }] }
+  }
+  const { handle, calls, downloads } = setup({
+    client: { supportsImages: true },
+    config: { imageInputMaxCount: 2 },
+    downloader: async () => ({ images: [], failures: ['TIMEOUT'] })
+  })
+  await handle(groupEvent('what is this', { img: ['https://a.test/1.png', 'https://a.test/2.png'], reply_id: 'q1', getReply }))
+  await handle(privateEvent('this?', { reply_id: 'q1', getReply }))
+  assert.equal(fetches, 2)
+  assert.deepEqual(downloads.map(item => item.urls), [['https://a.test/1.png', 'https://a.test/2.png'], ['https://a.test/q.png']])
+  assert.equal(typeof calls[0].currentMessage.content, 'string')
+  assert.match(calls[0].currentMessage.content, /see\[image\][\s\S]*what is this\n\[image\]\[image\]$/)
+  assert.match(calls[1].currentMessage.content, /see\[image\][\s\S]*this\?$/)
 })
