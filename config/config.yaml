@@ -29,6 +29,10 @@ dashscope:
   # 单次模型 HTTP 请求的超时时间，单位毫秒；作用于每一轮模型请求，
   # 不包含排队时间，也不限制能力工具/目标插件的执行时间。
   requestTimeoutMs: 30000
+  # 是否联网搜索（enable_search）。仅部分模型与地域支持，开启前确认当前模型可用；不返回来源网址。
+  webSearch: false
+  # 搜索策略：turbo（默认）或 max；其他值回退为 turbo。
+  searchStrategy: turbo
 
 # provider 为 chatgpt 时的设置：通过 Sign in with ChatGPT 使用 ChatGPT 套餐额度调用 Responses API。
 chatgpt:
@@ -41,6 +45,10 @@ chatgpt:
   reasoningEffort: low
   # 单次模型请求（含流式读取）的超时时间，单位毫秒；作用于每一轮模型请求。
   requestTimeoutMs: 60000
+  # 是否启用 OpenAI 托管的 web_search 工具；搜索结果计入输入 token，消耗明显高于普通聊天。
+  webSearch: false
+  # 回复末尾附带的来源网址条数，0–5，0 表示不附。
+  webSearchMaxSources: 3
 
 # ───────────── 以下为两种后端共用的设置 ─────────────
 

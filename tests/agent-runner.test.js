@@ -101,6 +101,15 @@ test('system prompt keeps common and selected conversation rules before sorted p
   )
 })
 
+test('web search rules are added only when the backend can search', () => {
+  const options = { conversationType: 'private', baseSystemPrompt: 'Base.', conversationSystemPrompt: 'Mode.' }
+  assert.doesNotMatch(buildSystemPrompt(options), /Web search:/)
+  const prompt = buildSystemPrompt({ ...options, webSearch: true, webSearchPrompt: 'Search rules.' })
+  assert.ok(prompt.indexOf('Mode.') < prompt.indexOf('Web search:\nSearch rules.'))
+  assert.ok(prompt.indexOf('Web search:') < prompt.indexOf('Registered plugin guides:'))
+  assert.match(buildSystemPrompt({ ...options, webSearch: true }), /猫猫可以联网搜索/)
+})
+
 test('system prompt loads only the rules for the selected conversation type', () => {
   const privatePrompt = buildSystemPrompt({ conversationType: 'private' })
   const groupPrompt = buildSystemPrompt({ conversationType: 'group' })

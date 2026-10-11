@@ -135,6 +135,55 @@ test('tool-call replies keep encrypted reasoning items without their ids', () =>
   assert.equal(toAssistantMessage([{ type: 'reasoning', encrypted_content: 'enc' }]).reasoning_items, undefined)
 })
 
+test('web search adds the hosted tool only when enabled', () => {
+  const messages = [{ role: 'user', content: 'hi' }]
+  assert.deepEqual(buildResponsesRequest({ model: 'm', messages, webSearch: true }).tools, [{ type: 'web_search' }])
+  const withFunctions = buildResponsesRequest({ model: 'm', messages, tools, webSearch: true }).tools
+  assert.deepEqual(withFunctions.map(tool => tool.type), ['function', 'web_search'])
+  assert.equal(buildResponsesRequest({ model: 'm', messages }).tools, undefined)
+})
+
+test('web search citations become plain-text sources after the reply', () => {
+  const muckrack = 'https://muckrack.com/media-outlet/reuters?utm_source=openai'
+  const text = `完全关闭。([muckrack.com](${muckrack}))\n下一句 ([a.com](https://a.com/x?utm_source=openai&id=1)).`
+  const items = [{
+    type: 'message',
+    content: [{
+      type: 'output_text',
+      text,
+      annotations: [
+        { type: 'url_citation', start_index: 5, end_index: 82, url: muckrack },
+        // An offset that no longer matches its URL is left to the pattern fallback.
+        { type: 'url_citation', start_index: 0, end_index: 3, url: 'https://a.com/x?utm_source=openai&id=1' }
+      ]
+    }]
+  }]
+  assert.equal(toAssistantMessage(items).content,
+    '完全关闭。\n下一句.\n来源：\nhttps://muckrack.com/media-outlet/reuters\nhttps://a.com/x?id=1')
+  assert.equal(toAssistantMessage(items, undefined, { maxSources: 1 }).content,
+    '完全关闭。\n下一句.\n来源：\nhttps://muckrack.com/media-outlet/reuters')
+  assert.equal(toAssistantMessage(items, undefined, { maxSources: 0 }).content, '完全关闭。\n下一句.')
+})
+
+test('client sends web search from config unless a call turns it off', async () => {
+  const bodies = []
+  const reply = sse([
+    { type: 'response.output_item.done', item: { type: 'web_search_call', status: 'completed' } },
+    { type: 'response.output_item.done', item: { type: 'message', content: [{ type: 'output_text', text: 'ok' }] } },
+    { type: 'response.completed', response: {} }
+  ])
+  const fetchImpl = async (url, init) => {
+    bodies.push(JSON.parse(init.body))
+    return new Response(reply)
+  }
+  const client = new ChatGPTClient({ credentialsFile: credentialsFile(), model: 'm', webSearch: true, fetchImpl })
+  assert.equal(client.webSearch, true)
+  assert.deepEqual(await client.complete({ messages: [{ role: 'user', content: 'hi' }] }), { content: 'ok' })
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }], tools: [], webSearch: false })
+  assert.deepEqual(bodies[0].tools, [{ type: 'web_search' }])
+  assert.equal(bodies[1].tools, undefined)
+})
+
 test('client streams a function call and returns OpenAI-style tool calls', async () => {
   const seen = {}
   const fetchImpl = async (url, init) => {

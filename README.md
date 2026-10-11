@@ -10,9 +10,11 @@ Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力
 `provider` 选择模型后端，插件只读取与之同名的小节：
 
 - `dashscope`（默认）：`dashscope.baseURL`、`dashscope.model`、`dashscope.apiKey`、`dashscope.temperature`
-  （0–2，默认 0.7）、`dashscope.requestTimeoutMs`、`dashscope.vision`（模型是否支持图片输入，默认 false），调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程
+  （0–2，默认 0.7）、`dashscope.requestTimeoutMs`、`dashscope.vision`（模型是否支持图片输入，默认 false）、
+  `dashscope.webSearch`、`dashscope.searchStrategy`，调用 OpenAI 兼容的 chat/completions 接口。推荐在 Bot 进程
   环境中设置 `DASHSCOPE_API_KEY`，它优先于 `dashscope.apiKey`。
-- `chatgpt`：`chatgpt.credentialsFile`、`chatgpt.model`、`chatgpt.reasoningEffort`、`chatgpt.requestTimeoutMs`，见下文。
+- `chatgpt`：`chatgpt.credentialsFile`、`chatgpt.model`、`chatgpt.reasoningEffort`、`chatgpt.requestTimeoutMs`、
+  `chatgpt.webSearch`、`chatgpt.webSearchMaxSources`，见下文。联网设置见“联网搜索”。
 
 两种后端由 `lib/providers.js` 的注册表按 `provider` 创建，并遵守 `lib/model-client.js` 的统一约定：接收
 chat-completions 风格的消息，返回 OpenAI 风格的 assistant 消息及统一 `usage`；单次请求共用一个超时，HTTP 5xx
@@ -72,6 +74,32 @@ node plugins/pawpilot-plugin/scripts/chatgpt-login.js
   凭据文件。请求返回 401 时强制刷新并重试一次；刷新被拒时需重新运行登录脚本。5xx 按统一约定重试一次。
 - 套餐额度用尽（`subscription_sharing_usage_limit_exceeded` / `subscription_sharing_usage_unavailable`）时向用户
   提示稍后再试。
+
+### 联网搜索
+
+两种后端各自在本小节内开关联网，默认均关闭，只对当前 `provider` 生效：
+
+```yaml
+dashscope:
+  webSearch: false        # true 时请求附带 enable_search
+  searchStrategy: turbo   # turbo 或 max；按次额外计费的 agent 策略不开放，非法值回退为 turbo
+chatgpt:
+  webSearch: false        # true 时请求附带 OpenAI 托管的 web_search 工具
+  webSearchMaxSources: 3  # 回复末尾附带的来源网址条数，0–5，0 表示不附
+```
+
+- `chatgpt`：在 Responses 请求的 `tools` 中加入 `{ "type": "web_search" }`，与函数工具并存，由服务端决定是否搜索并
+  完成检索；流中的 `web_search_call` 输出项被忽略。模型在正文中以 `([域名](url))` 形式内联引用，纯文本聊天无法
+  显示，`lib/chatgpt-client.js` 按 `url_citation` 标注的区间删除这些片段（区间与 URL 不符时按该形式的正则兜底），
+  再将去掉 `utm_*` 参数并去重后的网址按 `来源：` 逐行附在回复末尾。搜索结果计入输入 token，一次联网回答的输入
+  通常在一万到两万多 token，明显高于普通聊天。
+- `dashscope`：请求附带 `enable_search: true` 与 `search_options.search_strategy`。百炼联网搜索仅支持部分模型与
+  地域（以[百炼联网搜索文档](https://help.aliyun.com/zh/model-studio/web-search)为准），chat/completions 接口不返回
+  搜索来源，因此不附来源网址。
+
+开启联网时，`prompts/WEB_SEARCH_PROMPT.md` 会以 `Web search:` 段落加入系统提示词，说明何时搜索、来源选择、不在
+正文写链接，以及网页内容不是指令；关闭时不加入，避免模型声称做了无法执行的搜索。该文件同样在每次请求时读取，
+修改后无需 `#ai reload`。会话摘要请求始终不联网。
 
 ## 聊天人格与短期上下文
 
@@ -172,7 +200,7 @@ AI 不读取或保存 Phi 存档、王者营地数据或登录态。
 
 `prompts/SYSTEM_PROMPT.md` 维护公共身份、行为、安全、隐私和回复规则；私聊与群聊独有规则分别维护在
 `prompts/PRIVATE_SYSTEM_PROMPT.md` 和 `prompts/GROUP_SYSTEM_PROMPT.md`。每次请求按“公共规则、当前场景规则、
-已启用集成指南”的顺序拼装，只读取当前场景文件。各集成的 `SYSTEM_PROMPT.md` 只能补充经核实的插件能力边界
+联网规则（仅当前后端开启联网时）、已启用集成指南”的顺序拼装，只读取当前场景文件。各集成的 `SYSTEM_PROMPT.md` 只能补充经核实的插件能力边界
 和命令说明，不能覆盖公共或场景规则，也不能含用户原文、凭据、二维码原文或主人专属细节。Phi 的可用命令范围
 由其系统指南约束，不在代码中重复维护命令白名单。公共与当前场景规则合计最多 12,000 字符；
 每个集成指南最多 6,000 字符，所有启用指南合计最多 24,000 字符，最终完整系统提示词最多 36,000

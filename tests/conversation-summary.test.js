@@ -14,6 +14,7 @@ test('summaries fold dropped text into the previous summary at low effort withou
   assert.equal(result.summary.length, 10)
   assert.equal(request.reasoningEffort, 'low')
   assert.deepEqual(request.tools, [])
+  assert.equal(request.webSearch, false)
   assert.match(request.messages[0].content, /at most 10 characters/)
   assert.match(request.messages[1].content, /Previous summary:\nold/)
   assert.match(request.messages[1].content, /user: hi\nassistant: hello/)
