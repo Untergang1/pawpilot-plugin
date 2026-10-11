@@ -1,75 +1,21 @@
-import crypto from 'node:crypto'
 import cfg from '../../lib/config/config.js'
 import { CapabilityModuleLoader } from './lib/capability-loader.js'
 import { getAgentConfig } from './lib/config.js'
-import { ModelClientError } from './lib/model-client.js'
-import { createModelClient } from './lib/providers.js'
-import { RequestLimiter } from './lib/rate-limit.js'
-import { GroupRequestQueue } from './lib/group-request-queue.js'
-import { runFunctionCalling } from './lib/agent-runner.js'
-import { ConversationStore } from './lib/conversation-store.js'
-import { getGroupHistory } from './lib/group-history.js'
-import { getPrivateHistory } from './lib/private-history.js'
-import { buildUserMessage, getReplyContext, getReplyText } from './lib/reply-context.js'
-import { summarizeDropped, summaryMessage } from './lib/conversation-summary.js'
-import { MESSAGES } from './lib/messages.js'
-import {
-  buildGroupModelMessages,
-  createAssistantGroupEvent,
-  createCurrentGroupEvent
-} from './lib/group-context.js'
+import { createRequestPipeline } from './lib/request-pipeline.js'
 
 const registryLoader = new CapabilityModuleLoader()
-const limiter = new RequestLimiter()
-const groupQueue = new GroupRequestQueue()
-const conversations = new ConversationStore()
 let loadedModuleKey = ''
 
-function audit (record) {
-  const method = record.ok ? 'mark' : 'warn'
-  const text = `[pawpilot-plugin] request=${record.requestId} user=${record.userId} tool=${record.tool} ok=${record.ok} durationMs=${record.durationMs}${record.code ? ` code=${record.code}` : ''}`
-  global.logger?.[method]?.(text)
-}
-
-function logUsage (requestId, provider, conversationType, usage) {
-  if (!usage) return
-  global.logger?.mark?.(`[pawpilot-plugin] request=${requestId} usage provider=${provider} type=${conversationType} calls=${usage.modelCalls} input=${usage.inputTokens} cached=${usage.cachedTokens} output=${usage.outputTokens} reasoning=${usage.reasoningTokens}`)
-}
-
-function getConfig () {
-  const config = getAgentConfig()
-  const moduleIds = config.capabilityModules
-  const moduleKey = moduleIds.join(',')
-  return { config, moduleIds, moduleKey }
-}
-
-const CHATGPT_REAUTH_CODES = new Set(['NOT_LOGGED_IN', 'REAUTH_REQUIRED', 'CREDENTIALS_INVALID'])
-
-function publicErrorMessage (error) {
-  if (!(error instanceof ModelClientError)) return MESSAGES.error.unavailable
-  if (error.code === 'API_KEY_MISSING') return MESSAGES.error.apiKeyMissing
-  if (error.provider === 'chatgpt' && CHATGPT_REAUTH_CODES.has(error.code)) return MESSAGES.error.chatgptReauth
-  if (error.code === 'USAGE_LIMIT') return MESSAGES.error.usageLimit
-  if (error.code === 'RATE_LIMITED') return MESSAGES.error.rateLimited
-  return MESSAGES.error.unavailable
-}
-
-function sessionScope (event, userId, groupId) {
-  return { selfId: event.self_id, userId, groupId }
-}
-
-// Routes requests from one conversation to the same provider prompt cache without
-// sending raw QQ/WeChat identifiers to the model provider.
-function promptCacheKey ({ selfId, userId, groupId }) {
-  const raw = groupId ? `${selfId}:group:${groupId}` : `${selfId}:private:${userId}`
-  return `pawpilot-${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32)}`
-}
-
-async function ensureCapabilities (moduleIds, moduleKey) {
-  if (moduleKey === loadedModuleKey) return
+async function reloadModules (moduleIds) {
   registryLoader.moduleIds = moduleIds
-  await registryLoader.reload()
-  loadedModuleKey = moduleKey
+  const capabilities = await registryLoader.reload()
+  loadedModuleKey = moduleIds.join(',')
+  return capabilities
+}
+
+async function getRegistry (config) {
+  if (config.capabilityModules.join(',') !== loadedModuleKey) await reloadModules(config.capabilityModules)
+  return registryLoader.registry
 }
 
 function isOwner (event) {
@@ -78,48 +24,7 @@ function isOwner (event) {
   return owners.includes(String(event.user_id))
 }
 
-function isSelfMessage (event) {
-  return event?.self_id != null && event?.user_id != null &&
-    String(event.user_id) === String(event.self_id)
-}
-
-function isAgentMessage (event) {
-  // Ignore the bot's own messages (e.g. echoed sends) to avoid reply loops.
-  if (isSelfMessage(event)) return false
-  const message = typeof event?.msg === 'string' ? event.msg.trim() : ''
-  if (!message && event?.reply_id == null) return false
-  if (message.startsWith('#')) return false
-  if (event.isPrivate) return true
-  return event.isGroup && event.atBot === true
-}
-
-function sendSucceeded (result) {
-  return result !== false && result != null && !result?.error
-}
-
-function withSummary (scope, messages) {
-  const summary = summaryMessage(conversations.getSummary(scope))
-  return summary ? [summary, ...messages] : messages
-}
-
-/**
- * Folds turns dropped by trimming into the session summary in the background, so
- * the reply is never delayed. Failures keep the dropped text for the next attempt.
- */
-function scheduleSummary (scope, client, config, requestId) {
-  if (config.conversationSummaryEnabled === false) return
-  const claim = conversations.takeDropped(scope)
-  if (!claim) return
-  summarizeDropped({ client, summary: claim.summary, dropped: claim.dropped, maxChars: config.conversationSummaryMaxChars })
-    .then(({ summary, usage }) => {
-      conversations.finishSummary(claim, summary)
-      logUsage(requestId, config.provider, 'summary', usage && { modelCalls: 1, ...usage })
-    })
-    .catch(error => {
-      conversations.finishSummary(claim, null)
-      global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} summary failed code=${error?.code ?? 'UNKNOWN'}`)
-    })
-}
+const pipeline = createRequestPipeline({ getRegistry, isOwner })
 
 export class pawPilot extends plugin {
   constructor () {
@@ -130,25 +35,18 @@ export class pawPilot extends plugin {
       priority: 900,
       rule: [
         { reg: '^#ai\\s*reload$', fnc: 'reloadCapabilities', permission: 'master' },
-        { reg: '^#ai\\s*(重置|reset|新话题)$', fnc: 'resetConversation' }
+        { reg: '^#ai\\s*(重置|reset|新话题)$', fnc: 'resetConversation', permission: 'master' }
       ]
     })
   }
 
   async resetConversation () {
-    const event = this.e
-    const userId = String(event.user_id)
-    const groupId = event.isGroup && event.group_id ? String(event.group_id) : undefined
-    conversations.reset(sessionScope(event, userId, groupId))
-    return this.reply(groupId ? MESSAGES.resetGroup : MESSAGES.resetPrivate, true)
+    return this.reply(pipeline.reset(this.e), true)
   }
 
   async reloadCapabilities () {
     try {
-      const { moduleIds, moduleKey } = getConfig()
-      registryLoader.moduleIds = moduleIds
-      const capabilities = await registryLoader.reload()
-      loadedModuleKey = moduleKey
+      const capabilities = await reloadModules(getAgentConfig().capabilityModules)
       return this.reply(`AI 能力及集成提示词已重载：${capabilities.map(item => item.name).join('、') || '无'}`, true)
     } catch (error) {
       global.logger?.error?.('[pawpilot-plugin] capability reload failed', error)
@@ -157,172 +55,6 @@ export class pawPilot extends plugin {
   }
 
   async accept (event) {
-    if (!isAgentMessage(event)) return false
-    const { config, moduleIds, moduleKey } = getConfig()
-    if (config.enabled === false) return false
-    limiter.windowMs = config.rateLimitWindowMs
-    limiter.maxRequests = config.rateLimitMaxRequests
-    limiter.maxConcurrent = config.rateLimitMaxConcurrent
-    conversations.configure({
-      maxTurns: config.conversationHistoryTurns,
-      ttlMs: config.conversationTtlMinutes * 60_000,
-      maxChars: config.conversationMaxChars
-    })
-
-    const userText = typeof event.msg === 'string' ? event.msg.trim() : ''
-    const { maxInputChars } = config
-    if (userText.length > maxInputChars) {
-      return this.reply(MESSAGES.inputTooLong(maxInputChars), true)
-    }
-    const requestId = crypto.randomUUID()
-    const userId = String(event.user_id)
-    const groupId = event.group_id ? String(event.group_id) : undefined
-    const scope = sessionScope(event, userId, groupId)
-
-    if (event.isGroup && groupId) {
-      const rate = limiter.consume(`${event.self_id}:group:${groupId}:user:${userId}`)
-      if (!rate.ok) return this.reply(MESSAGES.rateLimited, true)
-      const queued = groupQueue.enqueue(
-        `bot:${event.self_id}:group:${groupId}`,
-        () => this.processAgentRequest(event, {
-          config,
-          moduleIds,
-          moduleKey,
-          requestId,
-          userId,
-          groupId,
-          scope,
-          userText,
-          maxInputChars
-        }),
-        config.groupRequestQueueMaxOutstanding
-      )
-      if (!queued.ok) return this.reply(MESSAGES.groupBusy, true)
-      return queued.promise
-    }
-
-    const lock = limiter.acquire(`${event.self_id}:private:${userId}`)
-    if (!lock.ok) {
-      return this.reply(lock.reason === 'BUSY' ? MESSAGES.privateBusy : MESSAGES.rateLimited, true)
-    }
-
-    try {
-      return await this.processAgentRequest(event, {
-        config,
-        moduleIds,
-        moduleKey,
-        requestId,
-        userId,
-        groupId,
-        scope,
-        userText,
-        maxInputChars
-      })
-    } finally {
-      lock.release()
-    }
-  }
-
-  async processAgentRequest (event, {
-    config,
-    moduleIds,
-    moduleKey,
-    requestId,
-    userId,
-    groupId,
-    scope,
-    userText,
-    maxInputChars
-  }) {
-    try {
-      const client = createModelClient(config)
-      await ensureCapabilities(moduleIds, moduleKey)
-
-      if (event.isGroup && groupId) {
-        const reply = await getReplyContext(event)
-        const currentEvent = createCurrentGroupEvent(event, userText, reply)
-        const historyEvents = config.groupHistoryRecoveryEnabled !== false
-          ? await getGroupHistory(
-            event,
-            config.groupHistoryRecoveryMaxMessages,
-            config.groupHistoryRecoveryMaxChars,
-            conversations.getResetAt(scope)
-          )
-          : []
-        const { contextMessages, currentMessage } = buildGroupModelMessages({
-          turns: conversations.getTurns(scope),
-          historyEvents,
-          currentEvent,
-          maxHistoryChars: config.conversationMaxChars,
-          maxInputChars,
-          nameEnabled: config.groupParticipantNameEnabled !== false
-        })
-        const result = await runFunctionCalling({
-          client,
-          registry: registryLoader.registry,
-          conversationType: 'group',
-          event,
-          userId,
-          groupId,
-          isOwner: isOwner(event),
-          currentMessage,
-          contextMessages: withSummary(scope, contextMessages),
-          requestId,
-          cacheKey: promptCacheKey(scope),
-          maxToolRounds: config.maxToolRounds,
-          audit
-        })
-        logUsage(requestId, config.provider, 'group', result.usage)
-        if (result.handled) return true
-        const text = result.text || MESSAGES.emptyReply
-        const sendResult = await this.reply(text, true)
-        if (sendSucceeded(sendResult)) {
-          conversations.appendTurn(
-            scope,
-            { ...currentEvent, source: 'completed_bot_turn' },
-            createAssistantGroupEvent(event, text, sendResult)
-          )
-          scheduleSummary(scope, client, config, requestId)
-        }
-        return sendResult
-      }
-
-      const replyText = await getReplyText(event)
-      const message = buildUserMessage(userText, replyText, maxInputChars)
-      if (!message) return this.reply(MESSAGES.emptyMessage, true)
-      const cachedHistory = conversations.getMessages(scope)
-      const recoveredHistory = cachedHistory.length || config.conversationHistoryRecoveryEnabled === false
-        ? []
-        : await getPrivateHistory(event, config.conversationHistoryRecoveryMaxMessages, conversations.getResetAt(scope))
-      const result = await runFunctionCalling({
-        client,
-        registry: registryLoader.registry,
-        conversationType: 'private',
-        event,
-        userId,
-        groupId,
-        isOwner: isOwner(event),
-        userMessage: message,
-        contextMessages: withSummary(scope, cachedHistory.length ? cachedHistory : recoveredHistory),
-        requestId,
-        cacheKey: promptCacheKey(scope),
-        maxToolRounds: config.maxToolRounds,
-        audit
-      })
-      logUsage(requestId, config.provider, 'private', result.usage)
-      if (result.handled) return true
-      const text = result.text || MESSAGES.emptyReply
-      const sendResult = await this.reply(text, true)
-      if (sendSucceeded(sendResult)) {
-        conversations.hydrateMessages(scope, recoveredHistory)
-        conversations.appendExchange(scope, message, text)
-        scheduleSummary(scope, client, config, requestId)
-      }
-      return sendResult
-    } catch (error) {
-      const publicMessage = publicErrorMessage(error)
-      global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} failed code=${error?.code ?? 'UNKNOWN'}${error?.providerCode ? ` providerCode=${error.providerCode}` : ''} message=${error?.message ?? ''}`)
-      return this.reply(publicMessage, true)
-    }
+    return pipeline.handle(event, getAgentConfig(), text => this.reply(text, true))
   }
 }

@@ -106,8 +106,8 @@ conversationSummaryMaxChars: 800
 以 `[Earlier conversation summary]` 开头作为第一条上下文消息发送；摘要失败时被丢弃的文本会留待下次重试。摘要与
 会话同属进程内存，随 TTL 过期或重启清空。关闭 `conversationSummaryEnabled` 后被丢弃的内容直接舍弃。
 
-任何用户发送 `#ai 重置`（也可用 `#ai reset`、`#ai 新话题`）都会清空当前会话的内存历史和摘要：私聊只影响本人，
-群聊影响全群共享的会话。插件同时记下重置时间，之后从适配器恢复私聊或群聊历史时只采用该时间之后的消息。
+主人发送 `#ai 重置`（也可用 `#ai reset`、`#ai 新话题`）会清空当前会话的内存历史和摘要：在私聊中只影响与主人的
+会话，在群聊中影响全群共享的会话；其他用户发送该命令不会生效。插件同时记下重置时间，之后从适配器恢复私聊或群聊历史时只采用该时间之后的消息。
 
 When a private conversation has no in-memory context, such as after a restart,
 pawpilot-plugin can recover the latest private messages through a compatible OneBot
@@ -152,6 +152,12 @@ input=<输入 token> cached=<命中缓存的输入 token> output=<输出 token> 
 后端未返回某项时记为 0。
 
 ## 开发
+
+`index.js` 只负责接入 Yunzai：注册命令、加载能力模块、判断主人身份。自然语言请求的完整流程在
+`lib/request-pipeline.js` 的 `createRequestPipeline` 中，包括准入（私聊限流与并发锁、群级 FIFO）、按私聊或群聊
+构建上下文、调用 `runFunctionCalling`、发送回复，以及发送成功后写入历史和安排摘要。Yunzai 相关依赖
+（`getRegistry`、`isOwner`、`reply`）以及模型客户端、执行器都通过参数注入，因此流程可以直接用假对象测试，见
+`tests/request-pipeline.test.js`。各模块共用的小工具函数放在 `lib/util.js`。
 
 能力协议见 [AI_CAPABILITIES.md](AI_CAPABILITIES.md)。测试无需真实 API：
 
