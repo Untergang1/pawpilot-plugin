@@ -49,7 +49,8 @@ Codex 是 agent 而非 chat-completions 接口，插件按以下方式把它当�
 - 输出由 JSON Schema 约束为 `{ reply, tool_calls }`，再转换为 OpenAI 风格的 assistant 消息，
   因此工具循环、权限检查与审计仍由 `runFunctionCalling` 负责。输出无法解析时本次请求失败。
 - 权限配置拒绝全部文件系统访问并限制网络，Codex 自带的 shell 和改文件工具无法执行；web search 关闭。
-  Codex 仍会注入其内置的 skills 与多智能体说明，子智能体继承同一权限配置。
+- 通过 feature 开关关闭 shell、子智能体、插件、apps、图像、浏览器等内置工具，并去掉 skills、apps、协作模式说明
+  与环境上下文（工作目录、日期等），每轮输入 token 约减半。模型目录决定的多智能体角色说明无法关闭，仍会注入。
 - 每轮都会启动一次 Codex CLI，单轮通常需要数秒到十余秒，超时由 `codex.requestTimeoutMs` 控制。Codex
   会在 `codex.home` 下保存每轮的会话记录，可按需清理。
 

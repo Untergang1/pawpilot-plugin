@@ -59,6 +59,8 @@ test('codex client sends system prompt as instructions and converts tool calls',
   assert.ok(seen.turnOptions.outputSchema)
   assert.equal(seen.options.env.CODEX_API_KEY, undefined)
   assert.equal(seen.options.config.default_permissions, 'pawpilot')
+  assert.equal(seen.options.config.features.shell_tool, false)
+  assert.equal(seen.options.config.skills.include_instructions, false)
   assert.equal(seen.threadOptions.sandboxMode, undefined)
   assert.equal(seen.threadOptions.modelReasoningEffort, 'low')
   assert.equal(fs.existsSync(seen.options.config.model_instructions_file), false)
