@@ -55,6 +55,8 @@ function setup ({ runner, config = {}, client = {}, sendResult = { message_id: '
 test('events that are not for the agent are ignored', async () => {
   const { handle, calls, replies } = setup()
   assert.equal(await handle(privateEvent('#phi b30')), false)
+  assert.equal(await handle(privateEvent('/help')), false)
+  assert.equal(await handle(privateEvent('／help')), false)
   assert.equal(await handle(groupEvent('hi', { atBot: false })), false)
   assert.equal(await handle(privateEvent('hi', { user_id: 'bot' })), false)
   const disabled = setup({ config: { enabled: false } })
