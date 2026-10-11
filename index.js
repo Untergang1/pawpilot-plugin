@@ -32,39 +32,34 @@ function audit (record) {
 
 function getConfig () {
   const config = getAgentConfig()
-  const moduleIds = Array.isArray(config.capabilityModules) ? config.capabilityModules : []
+  const moduleIds = config.capabilityModules
   const moduleKey = moduleIds.join(',')
   return { config, moduleIds, moduleKey }
 }
 
-function positiveInteger (value, fallback) {
-  const number = Number(value)
-  return Number.isInteger(number) && number > 0 ? number : fallback
-}
-
 function createModelClient (config) {
   if (config.provider === 'chatgpt') {
-    const chatgpt = config.chatgpt ?? {}
+    const { chatgpt } = config
     return new ChatGPTClient({
       credentialsFile: typeof chatgpt.credentialsFile === 'string' && chatgpt.credentialsFile
         ? chatgpt.credentialsFile
         : undefined,
       model: typeof chatgpt.model === 'string' ? chatgpt.model : undefined,
       reasoningEffort: typeof chatgpt.reasoningEffort === 'string' ? chatgpt.reasoningEffort : undefined,
-      timeoutMs: positiveInteger(chatgpt.requestTimeoutMs, 60_000)
+      timeoutMs: chatgpt.requestTimeoutMs
     })
   }
-  if (config.provider !== undefined && config.provider !== 'dashscope') {
+  if (config.provider !== 'dashscope') {
     throw new QwenClientError('Unknown model provider', 'INVALID_PROVIDER')
   }
-  const dashscope = config.dashscope ?? {}
+  const { dashscope } = config
   const apiKey = process.env.DASHSCOPE_API_KEY || dashscope.apiKey
   if (!apiKey) throw new QwenClientError('DashScope API key is not configured', 'API_KEY_MISSING')
   return new QwenClient({
     apiKey,
     baseURL: dashscope.baseURL,
     model: dashscope.model,
-    timeoutMs: positiveInteger(dashscope.requestTimeoutMs, 30_000)
+    timeoutMs: dashscope.requestTimeoutMs
   })
 }
 
@@ -146,17 +141,17 @@ export class pawPilot extends plugin {
     if (!isAgentMessage(event)) return false
     const { config, moduleIds, moduleKey } = getConfig()
     if (config.enabled === false) return false
-    limiter.windowMs = positiveInteger(config.rateLimitWindowMs, 60_000)
-    limiter.maxRequests = positiveInteger(config.rateLimitMaxRequests, 6)
-    limiter.maxConcurrent = positiveInteger(config.rateLimitMaxConcurrent, 1)
+    limiter.windowMs = config.rateLimitWindowMs
+    limiter.maxRequests = config.rateLimitMaxRequests
+    limiter.maxConcurrent = config.rateLimitMaxConcurrent
     conversations.configure({
-      maxTurns: positiveInteger(config.conversationHistoryTurns, 12),
-      ttlMs: positiveInteger(config.conversationTtlMinutes, 30) * 60_000,
-      maxChars: positiveInteger(config.conversationMaxChars, 12_000)
+      maxTurns: config.conversationHistoryTurns,
+      ttlMs: config.conversationTtlMinutes * 60_000,
+      maxChars: config.conversationMaxChars
     })
 
     const userText = typeof event.msg === 'string' ? event.msg.trim() : ''
-    const maxInputChars = positiveInteger(config.maxInputChars, 4000)
+    const { maxInputChars } = config
     if (userText.length > maxInputChars) {
       return this.reply(`消息过长，请控制在 ${maxInputChars} 个字符以内。`, true)
     }
@@ -181,7 +176,7 @@ export class pawPilot extends plugin {
           userText,
           maxInputChars
         }),
-        positiveInteger(config.groupRequestQueueMaxOutstanding, 8)
+        config.groupRequestQueueMaxOutstanding
       )
       if (!queued.ok) return this.reply('当前群的 AI 请求较多，请稍后再试。', true)
       return queued.promise
@@ -230,15 +225,15 @@ export class pawPilot extends plugin {
         const historyEvents = config.groupHistoryRecoveryEnabled !== false
           ? await getGroupHistory(
             event,
-            positiveInteger(config.groupHistoryRecoveryMaxMessages, 64),
-            positiveInteger(config.groupHistoryRecoveryMaxChars, 6000)
+            config.groupHistoryRecoveryMaxMessages,
+            config.groupHistoryRecoveryMaxChars
           )
           : []
         const { contextMessages, currentMessage } = buildGroupModelMessages({
           turns: conversations.getTurns(scope),
           historyEvents,
           currentEvent,
-          maxHistoryChars: positiveInteger(config.conversationMaxChars, 12_000),
+          maxHistoryChars: config.conversationMaxChars,
           maxInputChars,
           nameEnabled: config.groupParticipantNameEnabled !== false
         })
@@ -253,7 +248,7 @@ export class pawPilot extends plugin {
           currentMessage,
           contextMessages,
           requestId,
-          maxToolRounds: positiveInteger(config.maxToolRounds, 4),
+          maxToolRounds: config.maxToolRounds,
           audit
         })
         if (result.handled) return true
@@ -275,7 +270,7 @@ export class pawPilot extends plugin {
       const cachedHistory = conversations.getMessages(scope)
       const recoveredHistory = cachedHistory.length || config.conversationHistoryRecoveryEnabled === false
         ? []
-        : await getPrivateHistory(event, positiveInteger(config.conversationHistoryRecoveryMaxMessages, 8))
+        : await getPrivateHistory(event, config.conversationHistoryRecoveryMaxMessages)
       const result = await runFunctionCalling({
         client,
         registry: registryLoader.registry,
@@ -287,14 +282,17 @@ export class pawPilot extends plugin {
         userMessage: message,
         contextMessages: cachedHistory.length ? cachedHistory : recoveredHistory,
         requestId,
-        maxToolRounds: positiveInteger(config.maxToolRounds, 4),
+        maxToolRounds: config.maxToolRounds,
         audit
       })
       if (result.handled) return true
-      conversations.hydrateMessages(scope, recoveredHistory)
       const text = result.text || '我没有生成可发送的回复，请换一种问法。'
-      conversations.appendExchange(scope, message, text)
-      return this.reply(text, true)
+      const sendResult = await this.reply(text, true)
+      if (sendSucceeded(sendResult)) {
+        conversations.hydrateMessages(scope, recoveredHistory)
+        conversations.appendExchange(scope, message, text)
+      }
+      return sendResult
     } catch (error) {
       const publicMessage = publicErrorMessage(error)
       global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} failed code=${error?.code ?? 'UNKNOWN'} message=${error?.message ?? ''}`)

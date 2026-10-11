@@ -46,8 +46,8 @@ export default defineIntegration({
 verified commands, capability boundaries and safe next steps, but cannot override pawpilot-plugin's
 first-level identity, safety, privacy, authorization, or tool-use rules. It must not contain user
 input, tokens, cookies, QR-code content, private results or owner-only details. Each guide is
-limited to 12,000 characters and all enabled guides together to 36,000 characters; the complete
-assembled system prompt is limited to 48,000 characters.
+limited to 6,000 characters and all enabled guides together to 24,000 characters; the complete
+assembled system prompt is limited to 36,000 characters.
 
 ## Capability fields
 
