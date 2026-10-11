@@ -6,7 +6,9 @@ Yunzai Bot 的通用聊天与 Function Calling 插件。无需启用任何能力
 
 ## 配置
 
-全部配置均写入 [`config/config.yaml`](config/config.yaml)，这是 pawpilot-plugin 唯一读取的配置文件。
+全部配置均写入本地的 `config/config.yaml`，这是 pawpilot-plugin 唯一读取的配置文件。该文件不纳入版本控制；
+首次读取配置时若它不存在，会从模板 [`config/config.example.yaml`](config/config.example.yaml) 复制生成。模板
+更新后不会自动合并到已有的本地配置，需要时请自行对照修改。
 `provider` 选择模型后端，插件只读取与之同名的小节：
 
 - `dashscope`（默认）：`dashscope.baseURL`、`dashscope.model`、`dashscope.apiKey`、`dashscope.temperature`
