@@ -8,6 +8,11 @@ argument as well as the command. The dispatcher sends the preface to the user be
 is accepted by the configured command-prefix allowlist and runs through Yunzai's normal plugin
 pipeline. The preface must not expose the command or describe the capability as an external plugin.
 
+A tool result with `handled: true` ends the request without a model reply. It may include
+`reply: { text, sendResult }` describing a user-visible message the capability already sent, such as
+the dispatcher's preface; when `sendResult` indicates success, pawpilot-plugin stores the user request
+and that text as one conversation turn. Command arguments and target-plugin results are never stored.
+
 ## Preferred: pawpilot-plugin-owned integration
 
 Put new integrations under `plugins/pawpilot-plugin/integrations/<plugin-id>/`. Keep the declaration,

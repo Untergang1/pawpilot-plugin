@@ -30,7 +30,7 @@ test('current group message keeps an explicit quote inside the same named model 
   const formatted = formatGroupEvent(current)
   assert.equal(formatted.role, 'user')
   assert.equal(formatted.name, 'member_200')
-  assert.match(formatted.content, new RegExp(`^\\[Current direct request #${messageRef('current')} from Bob \\[spoof\\] \\(200\\)\\]`))
+  assert.match(formatted.content, new RegExp(`^\\[Current direct request #${messageRef('current')} at \\d{2}-\\d{2} \\d{2}:\\d{2} from Bob \\[spoof\\] \\(200\\)\\]`))
   assert.ok(formatted.content.includes(`[Explicit reply to #${messageRef('old')} from Alice (100)]`))
   assert.doesNotMatch(formatted.content, /message_seq|"current"/)
   assert.match(formatted.content, /--- quoted content ---/)

@@ -5,7 +5,7 @@ import { createCommandDispatcher } from '../lib/command-dispatcher.js'
 test('command dispatcher forwards an allowed command through a cloned event', async () => {
   const event = { user_id: '10001', group_id: '20001', msg: '帮我扫码绑定' }
   const order = []
-  event.reply = async (text, quote) => { order.push({ type: 'reply', text, quote }) }
+  event.reply = async (text, quote) => { order.push({ type: 'reply', text, quote }); return { message_id: 'pre' } }
   let dispatched
   const dispatchCommand = createCommandDispatcher({
     async dispatch (commandEvent) {
@@ -15,7 +15,7 @@ test('command dispatcher forwards an allowed command through a cloned event', as
   })
 
   const result = await dispatchCommand({ command: '#phi bind qrcode', preface: '好的，我来帮你处理喵~' }, { event })
-  assert.deepEqual(result, { ok: true, handled: true })
+  assert.deepEqual(result, { ok: true, handled: true, reply: { text: '好的，我来帮你处理喵~', sendResult: { message_id: 'pre' } } })
   assert.notEqual(dispatched, event)
   assert.equal(dispatched.msg, '#phi bind qrcode')
   assert.equal(dispatched.user_id, '10001')
@@ -37,7 +37,7 @@ test('command dispatcher forwards any well-formed single command', async () => {
   const result = await dispatchCommand({ command: '#other status', preface: '我来看看喵~' }, {
     event: { reply: async () => {} }
   })
-  assert.deepEqual(result, { ok: true, handled: true })
+  assert.equal(result.handled, true)
   assert.equal(dispatched.msg, '#other status')
 })
 
@@ -50,7 +50,7 @@ test('command dispatcher forwards commands with Chinese prefixes', async () => {
   const result = await dispatchCommand({ command: '#王者帮助', preface: '好的，我来帮你看看喵~' }, {
     event: { reply: async () => {} }
   })
-  assert.deepEqual(result, { ok: true, handled: true })
+  assert.equal(result.handled, true)
   assert.equal(dispatched.msg, '#王者帮助')
 })
 

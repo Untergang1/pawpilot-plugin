@@ -5,6 +5,8 @@ import { MESSAGES } from '../lib/messages.js'
 import { ModelClientError } from '../lib/model-client.js'
 import { createRequestPipeline } from '../lib/request-pipeline.js'
 
+const NOW = new Date(2026, 9, 11, 14, 5).getTime()
+const TIME_LINE = /^\[Current time: 2026-10-11 Sun 14:05 UTC[+-]\d{2}:\d{2}\]\n/
 const settle = () => new Promise(resolve => setImmediate(resolve))
 
 function privateEvent (msg, extra = {}) {
@@ -32,6 +34,7 @@ function setup ({ runner, config = {}, client = {}, sendResult = { message_id: '
     getRegistry: async () => ({}),
     isOwner: () => false,
     createClient: () => client,
+    now: () => NOW,
     runner: async args => {
       calls.push(args)
       return runner ? runner(args) : { text: `reply ${calls.length}` }
@@ -63,7 +66,8 @@ test('private replies are remembered only after a successful send', async () => 
   let ok = false
   const { handle, calls, replies } = setup({ sendResult: () => ok ? { message_id: 'sent' } : false })
   await handle(privateEvent('first'))
-  assert.deepEqual(calls[0].currentMessage, { role: 'user', content: 'first' })
+  assert.equal(calls[0].currentMessage.role, 'user')
+  assert.match(calls[0].currentMessage.content, new RegExp(`${TIME_LINE.source}first$`))
   assert.equal(calls[0].conversationType, 'private')
   assert.match(calls[0].cacheKey, /^pawpilot-[0-9a-f]{32}$/)
 
@@ -97,10 +101,28 @@ test('a second private request while one is running is refused as busy', async (
   assert.deepEqual(replies, [MESSAGES.privateBusy, 'done'])
 })
 
-test('handled tool results send nothing more and are not stored', async () => {
-  const { handle, calls, replies } = setup({ runner: () => ({ text: '', handled: true }) })
+test('handled tool results send nothing more and store only the sent preface', async () => {
+  const { handle, calls, replies } = setup({
+    runner: args => args.currentMessage.content.endsWith('run a command')
+      ? { text: '', handled: true, reply: { text: '猫猫这就去查喵~', sendResult: { message_id: 'pre' } } }
+      : { text: 'ok' }
+  })
   assert.equal(await handle(privateEvent('run a command')), true)
   assert.deepEqual(replies, [])
+  await handle(privateEvent('next'))
+  assert.deepEqual(calls[1].contextMessages, [
+    { role: 'user', content: 'run a command' },
+    { role: 'assistant', content: '猫猫这就去查喵~' }
+  ])
+})
+
+test('handled tool results without a sent preface are not stored', async () => {
+  const { handle, calls } = setup({
+    runner: args => args.currentMessage.content.endsWith('run a command')
+      ? { text: '', handled: true, reply: { text: '猫猫这就去查喵~', sendResult: false } }
+      : { text: 'ok' }
+  })
+  await handle(privateEvent('run a command'))
   await handle(privateEvent('next'))
   assert.deepEqual(calls[1].contextMessages, [])
 })
@@ -118,7 +140,7 @@ test('group requests use labelled group context and store completed turns for th
   await handle(groupEvent('hello'))
   assert.equal(calls[0].conversationType, 'group')
   assert.equal(calls[0].groupId, 'g1')
-  assert.match(calls[0].currentMessage.content, /^\[Current direct request #\w{6} from Alice \(u1\)\]\nhello$/)
+  assert.match(calls[0].currentMessage.content, new RegExp(`${TIME_LINE.source}\\[Current direct request #\\w{6} at \\d{2}-\\d{2} \\d{2}:\\d{2} from Alice \\(u1\\)\\]\\nhello$`))
 
   await handle(groupEvent('more', { user_id: 'u2', sender: { card: 'Bob' } }))
   assert.deepEqual(calls[1].contextMessages.map(message => message.role), ['user', 'assistant'])
