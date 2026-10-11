@@ -137,6 +137,29 @@ test('client refreshes once and retries after HTTP 401', async () => {
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).refresh_token, 'refresh-2')
 })
 
+test('client retries once after HTTP 5xx', async () => {
+  let calls = 0
+  let client = new ChatGPTClient({
+    credentialsFile: credentialsFile(),
+    model: 'm',
+    fetchImpl: async () => ++calls === 1
+      ? new Response('{}', { status: 502 })
+      : new Response(sse([{ type: 'response.completed', response: {} }]))
+  })
+  assert.deepEqual(await client.complete({ messages: [] }), { content: '' })
+  assert.equal(calls, 2)
+
+  calls = 0
+  client = new ChatGPTClient({
+    credentialsFile: credentialsFile(),
+    model: 'm',
+    fetchImpl: async () => { calls += 1; return new Response('{}', { status: 503 }) }
+  })
+  await assert.rejects(client.complete({ messages: [] }), error =>
+    error.code === 'HTTP_ERROR' && error.message.includes('HTTP 503'))
+  assert.equal(calls, 2)
+})
+
 test('credentials refresh near expiry once for concurrent callers and persist the rotated token', async () => {
   const file = credentialsFile({ access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 60 }) })
   let refreshes = 0

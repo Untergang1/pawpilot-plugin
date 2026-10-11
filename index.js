@@ -297,7 +297,7 @@ export class pawPilot extends plugin {
       return this.reply(text, true)
     } catch (error) {
       const publicMessage = publicErrorMessage(error)
-      global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} failed code=${error?.code ?? 'UNKNOWN'}`)
+      global.logger?.warn?.(`[pawpilot-plugin] request=${requestId} failed code=${error?.code ?? 'UNKNOWN'} message=${error?.message ?? ''}`)
       return this.reply(publicMessage, true)
     }
   }

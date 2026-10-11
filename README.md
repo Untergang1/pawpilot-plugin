@@ -54,7 +54,8 @@ node plugins/pawpilot-plugin/scripts/chatgpt-login.js
 - 预览接口要求 `store: false` 与 `stream: true`，且拒绝 `temperature`、`max_output_tokens` 等采样字段；插件读取
   SSE 流，从 `response.output_item.done` 收集输出，只有收到 `response.completed` 才视为成功。
 - 访问令牌有效期约 1 小时，距过期 5 分钟内自动刷新；refresh token 每次刷新都会轮换，进程内串行刷新并原子写回
-  凭据文件。请求返回 401 时强制刷新并重试一次；刷新被拒时需重新运行登录脚本。
+  凭据文件。请求返回 401 时强制刷新并重试一次；刷新被拒时需重新运行登录脚本。返回 5xx 时视为临时故障再重试一次，
+  两次请求共用同一超时。
 - 套餐额度用尽（`subscription_sharing_usage_limit_exceeded` / `subscription_sharing_usage_unavailable`）时向用户
   提示稍后再试。
 
